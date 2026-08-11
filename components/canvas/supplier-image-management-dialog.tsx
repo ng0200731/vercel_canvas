@@ -53,17 +53,16 @@ import {
   type SupplierMatchQueryImage,
 } from "@/lib/supplier-image-match";
 import { persistGeneratedImage, uploadImage } from "@/lib/upload";
+import { useUpsertProduct } from "@/lib/hooks/use-workspace-records";
 import { cn } from "@/lib/utils";
 import {
+  getProductPriceUnit,
   getWorkspaceProductTypeLabel,
   isSupplierProductType,
-  type ProductImageInput,
   type ProductRecord,
-  type ProductVariantRecord,
   type SupplierProductType,
   type SupplierRecord,
 } from "@/lib/workspace-records";
-
 interface SupplierImageManagementDialogProps {
   products: readonly ProductRecord[];
   suppliers: readonly SupplierRecord[];
@@ -88,50 +87,6 @@ interface ComparisonField {
   value: string;
 }
 
-/** Build a synthetic `ProductImageGalleryItem` for a the-eland.co remote match.
- *  The supplier node's `selectProductImage()` only reads a handful of fields
- *  (`product.productType/supplierId/subject/id`, `variant.id/image/material/
- *  colorNotes/parameters`), so we populate those and default the rest. The
- *  image URL is the *persisted* app URL (already durably stored in Supabase /
- *  local Postgres / data-URL), not the eland URL — eland URLs are opaque and
- *  may change, so the canvas must survive eland storage migrations. */
-function buildElandGalleryItem(
-  match: SupplierImageMatchCandidate,
-  persisted: { url: string; storagePath: string | null },
-  supplierId: string,
-  productType: SupplierProductType,
-): ProductImageGalleryItem {
-  const remoteRef = match.remoteId ?? match.catalogItemId;
-  const image: ProductImageInput = {
-    name: match.remoteName ?? "the-eland.co image",
-    url: persisted.url,
-    storagePath: persisted.storagePath,
-  };
-  const variant: ProductVariantRecord = {
-    id: `eland-variant:${remoteRef}`,
-    sortIndex: 0,
-    material: match.remoteTags?.[0] ?? "",
-    colorNotes: "",
-    parameters: {},
-    unitPrice: "",
-    priceUnit: "",
-    image,
-  } as ProductVariantRecord;
-  const product: ProductRecord = {
-    id: `eland:${remoteRef}`,
-    ownerKind: "supplier",
-    supplierId,
-    customerId: null,
-    projectId: null,
-    productType,
-    subject: match.remoteName ?? "the-eland.co match",
-    detail: match.remoteDescription ?? "",
-    variants: [variant],
-    createdAt: "",
-    updatedAt: "",
-  } as ProductRecord;
-  return { id: match.catalogItemId, product, variant: { ...variant, image }, variantIndex: 0 };
-}
 
 /** Comparison fields for a the-eland.co remote result (no local gallery item). */
 function buildElandComparisonFields(match: SupplierImageMatchCandidate): ComparisonField[] {
@@ -512,6 +467,7 @@ export function SupplierImageManagementDialog({
   const [isApplying, setIsApplying] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
   const matchMutation = useSupplierImageMatch();
+  const upsertProduct = useUpsertProduct();
 
   const supplierById = useMemo(
     () => new Map(suppliers.map((supplier) => [supplier.id, supplier])),
@@ -705,9 +661,13 @@ export function SupplierImageManagementDialog({
       return Promise.resolve();
     }
     // Eland remote match → download the eland image, persist it into the app's
-    // own storage (Supabase / local Postgres / data-URL), then hand a synthetic
-    // gallery item (carrying the persisted URL) to onSelect. eland URLs are
-    // opaque and may change, so we never leave an eland URL on the node.
+    // own storage, AND save it as a real ProductRecord under the current
+    // supplier. Saving it (rather than handing the node a synthetic item) has
+    // two pay-offs: the image persists in the supplier's product book across
+    // reloads, and the node's preview overlay gallery is built from the saved
+    // catalog — so the overlay actually shows this image when the user clicks
+    // the node's image. eland URLs are opaque and may change, so the saved
+    // product carries the *persisted* app URL, never the eland URL.
     if (!rankedMatch.match.remoteImageUrl) {
       setApplyError("This the-eland.co entry has no downloadable image.");
       return Promise.resolve();
@@ -720,31 +680,75 @@ export function SupplierImageManagementDialog({
     // fall back to the original if the thumbnail is missing (may be null).
     const downloadUrl =
       rankedMatch.match.remoteThumbnailUrl ?? rankedMatch.match.remoteImageUrl;
-    // Derive a sensible product type for the synthetic item: prefer the
-    // supplier's first catalog type for the current supplier; fall back to a
-    // known default so the field is non-null.
+    // Use the supplier's existing catalog type if it already has images; the
+    // node's product-type filter is bound to that type, so a saved product of a
+    // different type would be hidden. Otherwise default to woven-label.
     const fallbackProductType: SupplierProductType =
       (galleryItems.find((g) => g.product.supplierId === currentSupplierId)?.product
         .productType as SupplierProductType | undefined) ?? "woven-label";
+    const match = rankedMatch.match;
+    const subject = (match.remoteName ?? "the-eland.co image").slice(0, 200);
+    const detail = (match.remoteDescription ?? "Imported from the-eland.co").slice(0, 2000) || "Imported from the-eland.co";
+    const material = (match.remoteTags?.[0] ?? "Unknown").slice(0, 200) || "Unknown";
+    const colorNotes = (match.remoteTags?.slice(0, 3).join(", ") || "Unknown").slice(0, 200) || "Unknown";
 
     setIsApplying(true);
     return persistGeneratedImage(downloadUrl)
-      .then((persisted) => {
-        const synthetic = buildElandGalleryItem(
-          rankedMatch.match,
-          persisted,
-          currentSupplierId,
-          fallbackProductType,
-        );
-        onSelect(synthetic);
+      .then((persisted) =>
+        // Save the persisted image as a real ProductRecord (.ownerKind supplier,
+        // under the current supplier). The store validates the full record, so
+        // we supply every required field. The returned record carries the real
+        // product.id / variant.id — that's what the node needs so the overlay
+        // gallery (which is keyed by `${productId}:${variantId}`) is in sync.
+        upsertProduct.mutateAsync({
+          id: null,
+          input: {
+            ownerKind: "supplier",
+            supplierId: currentSupplierId,
+            customerId: null,
+            projectId: null,
+            productType: fallbackProductType,
+            subject,
+            detail,
+            variants: [
+              {
+                id: `eland-${match.remoteId ?? match.catalogItemId}`,
+                sortIndex: 0,
+                material,
+                colorNotes,
+                parameters: {},
+                unitPrice: "0",
+                priceUnit: getProductPriceUnit(fallbackProductType),
+                image: {
+                  name: match.remoteName ?? "the-eland.co image",
+                  url: persisted.url,
+                  storagePath: persisted.storagePath,
+                },
+              },
+            ],
+          },
+        }),
+      )
+      .then((savedProduct) => {
+        const savedVariant = savedProduct.variants[0];
+        if (!savedVariant || !savedVariant.image) {
+          throw new Error("the-eland.co image saved but no variant was returned.");
+        }
+        const galleryItem: ProductImageGalleryItem = {
+          id: `${savedProduct.id}:${savedVariant.id}`,
+          product: savedProduct,
+          variant: { ...savedVariant, image: savedVariant.image },
+          variantIndex: 0,
+        };
+        onSelect(galleryItem);
         setComparisonMatchId(null);
         setOpen(false);
       })
       .catch((error: unknown) => {
         const message =
           error instanceof Error
-            ? `Could not download the image from the-eland.co: ${error.message}`
-            : "Could not download the image from the-eland.co.";
+            ? `Could not apply the the-eland.co image: ${error.message}`
+            : "Could not apply the the-eland.co image.";
         setApplyError(message);
       })
       .finally(() => setIsApplying(false));
@@ -1229,7 +1233,7 @@ export function SupplierImageManagementDialog({
                   <div className="min-w-0 space-y-1">
                     <p className="text-muted-foreground text-sm">
                       {isApplying
-                        ? "Downloading and saving the image from the-eland.co…"
+                        ? "Downloading the image and saving it to this supplier's catalog…"
                         : "Review the pair, then apply the selected image."}
                     </p>
                     {applyError ? (
