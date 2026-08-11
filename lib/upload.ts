@@ -151,13 +151,34 @@ export async function uploadImage(
   return { url: await blobToDataUrl(blob), storagePath: null };
 }
 
+/**
+ * Wraps a cross-origin remote image URL so the fetch goes through the app's
+ * own `/api/remote-image` proxy. Direct browser `fetch()` to third-party image
+ * hosts often fails with a generic `TypeError: Failed to fetch` because the
+ * host sends no CORS headers (or a browser extension rewrites the request);
+ * the proxy runs server-side and avoids both. Same-origin and data: URLs are
+ * untouched (they don't need the proxy).
+ */
+function proxiedRemoteImageUrl(url: string): string {
+  if (!url) return url;
+  if (url.startsWith("data:") || url.startsWith("/")) return url;
+  try {
+    const parsed = new URL(url);
+    // Same-origin absolute URLs (e.g. the app's own served uploads) skip the proxy.
+    if (parsed.origin === window.location.origin) return url;
+    return `/api/remote-image?url=${encodeURIComponent(url)}`;
+  } catch {
+    return url;
+  }
+}
+
 /** Converts a provider result (data URL or remote URL) into durable app storage. */
 export async function persistGeneratedImage(
   url: string,
   format: ImageGenerationOutputFormat = DEFAULT_FORMAT,
   signal?: AbortSignal,
 ): Promise<UploadResult> {
-  const response = await fetch(url, { signal });
+  const response = await fetch(proxiedRemoteImageUrl(url), { signal });
   if (!response.ok) throw new Error("Failed to read the generated image.");
   const blob = await response.blob();
   signal?.throwIfAborted();

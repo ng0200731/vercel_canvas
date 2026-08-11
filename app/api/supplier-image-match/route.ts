@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { supplierImageMatchRequestSchema } from "@/lib/supplier-image-match";
+import { matchSupplierImagesWithEland } from "@/lib/supplier-image-eland";
 import { matchSupplierImagesWithMilvus } from "@/lib/supplier-image-milvus";
 import { matchSupplierImagesWithPictureSherlock } from "@/lib/supplier-image-picture-sherlock";
 import { matchSupplierImages, type SupplierImageMatcher } from "@/lib/supplier-image-vector-match";
@@ -12,12 +13,14 @@ interface SupplierImageMatchRouteDependencies {
   matchPictureSherlock: SupplierImageMatcher;
   matchMilvus: SupplierImageMatcher;
   matchLocal: SupplierImageMatcher;
+  matchEland: SupplierImageMatcher;
 }
 
 export function createSupplierImageMatchPostHandler({
   matchPictureSherlock,
   matchMilvus,
   matchLocal,
+  matchEland,
 }: SupplierImageMatchRouteDependencies) {
   return async function POST(request: Request) {
     let payload: unknown;
@@ -37,9 +40,11 @@ export function createSupplierImageMatchPostHandler({
     const match =
       parsed.data.engine === "milvus"
         ? matchMilvus
-        : parsed.data.engine === "local"
+        : parsed.data.engine === "local" || parsed.data.engine === "labelstash"
           ? matchLocal
-          : matchPictureSherlock;
+          : parsed.data.engine === "eland"
+            ? matchEland
+            : matchPictureSherlock;
 
     try {
       return NextResponse.json(await match(parsed.data, request.signal));
@@ -55,4 +60,5 @@ export const POST = createSupplierImageMatchPostHandler({
   matchPictureSherlock: matchSupplierImagesWithPictureSherlock,
   matchMilvus: matchSupplierImagesWithMilvus,
   matchLocal: matchSupplierImages,
+  matchEland: matchSupplierImagesWithEland,
 });

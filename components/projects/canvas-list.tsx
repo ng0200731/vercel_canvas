@@ -438,7 +438,10 @@ export function SendCanvasDialog({ canvas, project }: { canvas: Canvas; project:
         }`,
         ...current.filter((record) => !record.startsWith(sentAt)),
       ]);
-      setSendHistory((current) => [finalizedSend, ...current]);
+      setSendHistory((current) => {
+        const withoutProvisional = current.filter((record) => record.id !== finalizedSend.id);
+        return [finalizedSend, ...withoutProvisional];
+      });
       void queryClient.invalidateQueries({ queryKey: ["canvases", canvas.projectId] });
       toast.success(`Email sent to ${recipients.length} recipient(s).`, {
         position: "bottom-right",
@@ -569,8 +572,8 @@ export function SendCanvasDialog({ canvas, project }: { canvas: Canvas; project:
             <div className="rounded-md border p-3">
               <p className="mb-2 text-sm font-medium">Approval history</p>
               <div className="text-muted-foreground grid gap-1 text-xs">
-                {sendHistory.map((record) => (
-                  <p key={record.id}>
+                {sendHistory.map((record, index) => (
+                  <p key={`${record.id}-${index}`}>
                     {record.sequence} - {canvasStatusLabel(record.status)} -{" "}
                     {formatDate(record.createdAt)} - {record.recipientEmail}
                   </p>

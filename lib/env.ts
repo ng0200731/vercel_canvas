@@ -88,6 +88,20 @@ const envSchema = z
     ),
     MILVUS_MATCH_FALLBACK_TO_LOCAL: optionalBoolean.default(true),
 
+    // ── the-eland.co LabelStash Partner Search API (optional, server-only) ──
+    // Authenticates with the X-API-Key header against POST /api/portal/v1/search.
+    // The key is created self-serve at https://the-eland.co/portal/keys (shown
+    // exactly once). The API searches only images your org previously uploaded
+    // at /portal/upload — there is no upload API and no per-supplier filter.
+    ELAND_PORTAL_API_KEY: optionalString,
+    ELAND_PORTAL_BASE_URL: optionalUrl.default("https://the-eland.co"),
+    ELAND_PORTAL_TIMEOUT_MS: optionalIntDefault(60_000).pipe(
+      z.number().int().min(1_000).max(300_000),
+    ),
+    ELAND_PORTAL_TOP_K: optionalIntDefault(10).pipe(
+      z.number().int().min(1).max(10),
+    ),
+
     // SMTP (optional, server-only). An optional local catcher overrides 163.com, then Gmail.
     SMTP_LOCAL_HOST: optionalString,
     SMTP_LOCAL_PORT: optionalPort,
@@ -156,6 +170,10 @@ function loadEnv(): Env {
     MILVUS_MATCH_URL: process.env.MILVUS_MATCH_URL,
     MILVUS_MATCH_TIMEOUT_MS: process.env.MILVUS_MATCH_TIMEOUT_MS,
     MILVUS_MATCH_FALLBACK_TO_LOCAL: process.env.MILVUS_MATCH_FALLBACK_TO_LOCAL,
+    ELAND_PORTAL_API_KEY: process.env.ELAND_PORTAL_API_KEY,
+    ELAND_PORTAL_BASE_URL: process.env.ELAND_PORTAL_BASE_URL,
+    ELAND_PORTAL_TIMEOUT_MS: process.env.ELAND_PORTAL_TIMEOUT_MS,
+    ELAND_PORTAL_TOP_K: process.env.ELAND_PORTAL_TOP_K,
     SMTP_163_USERNAME: process.env.SMTP_163_USERNAME,
     SMTP_163_PASSWORD: process.env.SMTP_163_PASSWORD,
     SMTP_LOCAL_HOST: process.env.SMTP_LOCAL_HOST,
@@ -206,6 +224,9 @@ export const isPictureSherlockConfigured = Boolean(env.PICTURE_SHERLOCK_URL);
 
 /** True when the Milvus Lite CLIP match sidecar is configured. */
 export const isMilvusMatchConfigured = Boolean(env.MILVUS_MATCH_URL);
+
+/** True when the the-eland.co LabelStash Partner Search API key is present. */
+export const isElandConfigured = Boolean(env.ELAND_PORTAL_API_KEY);
 
 /**
  * Server-only: returns DATABASE_URL when local Postgres mode is active.

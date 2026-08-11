@@ -12,6 +12,7 @@ import {
 } from "@/lib/image-vector-search";
 import {
   SUPPLIER_MATCH_MODEL,
+  SUPPLIER_MATCH_LABELSTASH_MODEL,
   supplierImageMatchRequestSchema,
   type SupplierImageMatchRequest,
   type SupplierImageMatchResponse,
@@ -175,6 +176,19 @@ export async function embedImageSource(
     throw new Error("Image embedding requires an RGB image.");
   }
   return embedRgbRaw(data, IMAGE_VECTOR_EMBED_SIZE);
+}
+
+/** Fetch a query/catalog image URL (http/https or data URL) into a Buffer.
+ *  Reuses the SSRF-safe remote fetcher, so it enforces the same private-host
+ *  guards as the local embedding path. Exposed for sidecars/matchers that need
+ *  the raw image bytes (e.g. the eland multipart `image` field). */
+export async function fetchImageBuffer(
+  source: string,
+  fetcher: typeof fetch = fetch,
+  signal?: AbortSignal,
+): Promise<Buffer> {
+  signal?.throwIfAborted();
+  return source.startsWith("data:") ? bufferFromDataUrl(source) : fetchRemoteImage(source, fetcher, signal);
 }
 
 function boundedCrop(
@@ -362,7 +376,7 @@ export async function runSupplierImageVectorSearch(
       cosine: hit.cosine,
     })),
     searchedCount: input.catalog.length,
-    model: SUPPLIER_MATCH_MODEL,
+    model: input.engine === "labelstash" ? SUPPLIER_MATCH_LABELSTASH_MODEL : SUPPLIER_MATCH_MODEL,
   };
 }
 

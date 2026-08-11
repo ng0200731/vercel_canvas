@@ -32,6 +32,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSupplierImageMatch } from "@/lib/hooks/use-supplier-image-match";
 import {
@@ -40,7 +41,9 @@ import {
 } from "@/lib/product-image-gallery";
 import {
   MAX_SUPPLIER_MATCH_CATALOG_IMAGES,
+  SUPPLIER_MATCH_ELAND_MODEL,
   SUPPLIER_MATCH_LOCAL_MODEL,
+  SUPPLIER_MATCH_LABELSTASH_MODEL,
   SUPPLIER_MATCH_MILVUS_MODEL,
   SUPPLIER_MATCH_PICTURE_SHERLOCK_MODEL,
   supplierMatchUploadMetadataSchema,
@@ -49,12 +52,15 @@ import {
   type SupplierMatchEngine,
   type SupplierMatchQueryImage,
 } from "@/lib/supplier-image-match";
-import { uploadImage } from "@/lib/upload";
+import { persistGeneratedImage, uploadImage } from "@/lib/upload";
 import { cn } from "@/lib/utils";
 import {
   getWorkspaceProductTypeLabel,
   isSupplierProductType,
+  type ProductImageInput,
   type ProductRecord,
+  type ProductVariantRecord,
+  type SupplierProductType,
   type SupplierRecord,
 } from "@/lib/workspace-records";
 
@@ -73,13 +79,72 @@ interface SupplierImageManagementDialogProps {
 
 interface RankedMatch {
   match: SupplierImageMatchCandidate;
-  item: ProductImageGalleryItem;
-  supplier: SupplierRecord;
+  item: ProductImageGalleryItem | null;
+  supplier: SupplierRecord | null;
 }
 
 interface ComparisonField {
   label: string;
   value: string;
+}
+
+/** Build a synthetic `ProductImageGalleryItem` for a the-eland.co remote match.
+ *  The supplier node's `selectProductImage()` only reads a handful of fields
+ *  (`product.productType/supplierId/subject/id`, `variant.id/image/material/
+ *  colorNotes/parameters`), so we populate those and default the rest. The
+ *  image URL is the *persisted* app URL (already durably stored in Supabase /
+ *  local Postgres / data-URL), not the eland URL — eland URLs are opaque and
+ *  may change, so the canvas must survive eland storage migrations. */
+function buildElandGalleryItem(
+  match: SupplierImageMatchCandidate,
+  persisted: { url: string; storagePath: string | null },
+  supplierId: string,
+  productType: SupplierProductType,
+): ProductImageGalleryItem {
+  const remoteRef = match.remoteId ?? match.catalogItemId;
+  const image: ProductImageInput = {
+    name: match.remoteName ?? "the-eland.co image",
+    url: persisted.url,
+    storagePath: persisted.storagePath,
+  };
+  const variant: ProductVariantRecord = {
+    id: `eland-variant:${remoteRef}`,
+    sortIndex: 0,
+    material: match.remoteTags?.[0] ?? "",
+    colorNotes: "",
+    parameters: {},
+    unitPrice: "",
+    priceUnit: "",
+    image,
+  } as ProductVariantRecord;
+  const product: ProductRecord = {
+    id: `eland:${remoteRef}`,
+    ownerKind: "supplier",
+    supplierId,
+    customerId: null,
+    projectId: null,
+    productType,
+    subject: match.remoteName ?? "the-eland.co match",
+    detail: match.remoteDescription ?? "",
+    variants: [variant],
+    createdAt: "",
+    updatedAt: "",
+  } as ProductRecord;
+  return { id: match.catalogItemId, product, variant: { ...variant, image }, variantIndex: 0 };
+}
+
+/** Comparison fields for a the-eland.co remote result (no local gallery item). */
+function buildElandComparisonFields(match: SupplierImageMatchCandidate): ComparisonField[] {
+  const tags = (match.remoteTags ?? []).slice(0, 4).join(", ") || "None";
+  return [
+    { label: "Name", value: match.remoteName ?? "Unnamed" },
+    {
+      label: "Description",
+      value: normalizeComparisonValue(match.remoteDescription),
+    },
+    { label: "Tags", value: tags },
+    { label: "Image ID", value: normalizeComparisonValue(match.remoteId) },
+  ];
 }
 
 function normalizeComparisonValue(value: string | null | undefined): string {
@@ -157,6 +222,12 @@ function matchEngineLabel(model: string): string {
   }
   if (model === SUPPLIER_MATCH_LOCAL_MODEL) {
     return "Local histogram fallback";
+  }
+  if (model === SUPPLIER_MATCH_LABELSTASH_MODEL) {
+    return "Local visual embeddings (LabelStash-style)";
+  }
+  if (model === SUPPLIER_MATCH_ELAND_MODEL) {
+    return "the-eland.co Partner Search API";
   }
   return model;
 }
@@ -244,6 +315,82 @@ function CatalogUnavailable({ loading, error }: { loading: boolean; error: strin
   );
 }
 
+/** the-eland.co returns an empty `results` array when nothing is indexed yet
+ *  (a freshly uploaded image, or no upload at all). That is a 200 success, not
+ *  an error — surface it honestly with the next steps. */
+function ElandEmptyResults({ portalUploadUrl }: { portalUploadUrl?: string }) {
+  const uploadHref = portalUploadUrl
+    ? new URL("/portal/upload", portalUploadUrl).toString()
+    : "https://the-eland.co/portal/upload";
+  const keysHref = portalUploadUrl
+    ? new URL("/portal/keys", portalUploadUrl).toString()
+    : "https://the-eland.co/portal/keys";
+  return (
+    <div className="grid min-h-72 place-items-center rounded-xl border border-dashed p-8 text-center">
+      <div className="max-w-md space-y-3">
+        <Images className="text-muted-foreground mx-auto size-9" />
+        <p className="font-heading font-semibold">No matches on the-eland.co yet</p>
+        <p className="text-muted-foreground text-sm leading-6">
+          the-eland.co returned no results. The portal searches only images your organization
+          previously uploaded at{" "}
+          <a
+            href={uploadHref}
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary underline underline-offset-2"
+          >
+            /portal/upload
+          </a>{" "}
+          and indexed. A freshly uploaded image returns nothing until indexing completes (no status
+          field — just wait, then retry). Also confirm{" "}
+          <a
+            href={keysHref}
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary underline underline-offset-2"
+          >
+            /portal/keys
+          </a>{" "}
+          has an Active key and <code>ELAND_PORTAL_API_KEY</code> is set in <code>.env.local</code>.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/** State for the optional eland free-text query, lifted out of the local
+ *  ElandQueryBox so the dialog can attach it to the mutation call. */
+const elandQueryStore: { current: string } = { current: "" };
+
+/** Free-text query box for the eland engine. The portal matches this against
+ *  the name, description, and tags written at upload time — there is no
+ *  per-supplier filter, so this is the only way to narrow toward a supplier. */
+function ElandQueryBox({ disabled }: { disabled: boolean }) {
+  const [value, setValue] = useState(elandQueryStore.current);
+  return (
+    <div className="space-y-1.5">
+      <label htmlFor="eland-query" className="text-muted-foreground text-xs font-medium">
+        Optional text query (matches name / description / tags on the-eland.co)
+      </label>
+      <Input
+        id="eland-query"
+        type="text"
+        value={value}
+        disabled={disabled}
+        maxLength={200}
+        placeholder="e.g. woven navy elastic"
+        onChange={(event) => {
+          setValue(event.target.value);
+          elandQueryStore.current = event.target.value;
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.preventDefault();
+        }}
+      />
+    </div>
+  );
+}
+
 function RankedMatchCard({
   rankedMatch,
   rank,
@@ -257,6 +404,23 @@ function RankedMatchCard({
 }) {
   const { item, match, supplier } = rankedMatch;
   const confidence = confidenceLabel(match.cosine);
+  const isRemote = Boolean(match.remoteImageUrl ?? match.remoteThumbnailUrl ?? match.remoteName);
+  const cardImageSrc =
+    match.remoteThumbnailUrl ?? match.remoteImageUrl ?? item?.variant.image.url ?? "";
+  const cardImageAlt = match.remoteName ?? item?.variant.image.name ?? "Match image";
+  const cardTitle = match.remoteName ?? item?.product.subject ?? "Match";
+  const cardSubtitle = isRemote
+    ? `Score ${match.cosine.toFixed(3)} · ranked #${rank} on the-eland.co${
+        match.cosine < 0.5 ? " · weak overall — top rank may still not be a true match" : ""
+      }`
+    : `Score ${match.cosine.toFixed(3)} · ranked #${rank} for this supplier${
+        match.cosine < 0.5 ? " · weak overall — top rank may still not be a true match" : ""
+      }`;
+  const cardTags: string[] = isRemote
+    ? (match.remoteTags ?? []).slice(0, 6)
+    : [item?.variant.image.name, item?.variant.material, item?.variant.colorNotes].filter(
+        (value): value is string => Boolean(value),
+      );
   return (
     <article
       className={cn(
@@ -265,12 +429,14 @@ function RankedMatchCard({
       )}
     >
       <div className="bg-muted relative aspect-square overflow-hidden rounded-lg border">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={item.variant.image.url}
-          alt={item.variant.image.name}
-          className="size-full object-contain"
-        />
+        {cardImageSrc ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={cardImageSrc} alt={cardImageAlt} className="size-full object-contain" />
+        ) : (
+          <div className="text-muted-foreground grid size-full place-items-center p-2 text-center text-[0.65rem]">
+            No image
+          </div>
+        )}
         <span className="absolute top-2 left-2 grid size-7 place-items-center rounded-full bg-black/75 text-xs font-bold text-white ring-1 ring-white/25">
           {rank}
         </span>
@@ -286,26 +452,24 @@ function RankedMatchCard({
           <Badge variant="outline" className={confidence.className}>
             {confidence.label}
           </Badge>
-          <Badge variant="secondary">{supplier.company.companyName}</Badge>
-          <Badge variant="outline">{getWorkspaceProductTypeLabel(item.product.productType)}</Badge>
+          {supplier ? <Badge variant="secondary">{supplier.company.companyName}</Badge> : null}
+          {item ? (
+            <Badge variant="outline">
+              {getWorkspaceProductTypeLabel(item.product.productType)}
+            </Badge>
+          ) : null}
+          {isRemote ? <Badge variant="outline">the-eland.co</Badge> : null}
         </div>
         <div>
-          <p className="truncate font-semibold">{item.product.subject}</p>
-          <p className="text-muted-foreground line-clamp-2 text-sm leading-5">
-            Score {match.cosine.toFixed(3)} · ranked #{rank} for this supplier
-            {match.cosine < 0.5
-              ? " · weak overall — top rank may still not be a true match"
-              : ""}
-          </p>
+          <p className="truncate font-semibold">{cardTitle}</p>
+          <p className="text-muted-foreground line-clamp-2 text-sm leading-5">{cardSubtitle}</p>
         </div>
         <div className="text-muted-foreground flex flex-wrap gap-1 text-[0.68rem]">
-          <span className="bg-muted rounded-md px-2 py-1">{item.variant.image.name}</span>
-          {item.variant.material ? (
-            <span className="bg-muted rounded-md px-2 py-1">{item.variant.material}</span>
-          ) : null}
-          {item.variant.colorNotes ? (
-            <span className="bg-muted rounded-md px-2 py-1">{item.variant.colorNotes}</span>
-          ) : null}
+          {cardTags.map((tag) => (
+            <span key={tag} className="bg-muted rounded-md px-2 py-1">
+              {tag}
+            </span>
+          ))}
         </div>
       </div>
 
@@ -345,6 +509,8 @@ export function SupplierImageManagementDialog({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [queryImage, setQueryImage] = useState<SupplierMatchQueryImage | null>(null);
   const [comparisonMatchId, setComparisonMatchId] = useState<string | null>(null);
+  const [isApplying, setIsApplying] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
   const matchMutation = useSupplierImageMatch();
 
   const supplierById = useMemo(
@@ -401,13 +567,18 @@ export function SupplierImageManagementDialog({
 
   const rankedMatches = useMemo<RankedMatch[]>(() => {
     if (!matchMutation.data) return [];
+    if (engine === "eland") {
+      // eland returns its own opaque ids (not local catalog ids), so there is
+      // no gallery join — render each match straight from the remote fields.
+      return matchMutation.data.matches.map((match) => ({ match, item: null, supplier: null }));
+    }
     const raw = matchMutation.data.matches.flatMap((match) => {
       const item = galleryById.get(match.catalogItemId);
       const supplierId = item?.product.supplierId;
       const supplier = supplierId ? supplierById.get(supplierId) : undefined;
       return item && supplier ? [{ match, item, supplier }] : [];
     });
-    if (engine !== "local" || raw.length < 2) return raw;
+    if ((engine !== "local" && engine !== "labelstash") || raw.length < 2) return raw;
 
     // The local embedding's cosine sits in a narrow band near 1.0 for any two
     // natural photos, so the raw percentage reads as ~99% for everything. For
@@ -428,13 +599,26 @@ export function SupplierImageManagementDialog({
     });
   }, [galleryById, matchMutation.data, supplierById, engine]);
   const comparisonMatch = useMemo(
-    () => rankedMatches.find((match) => match.item.id === comparisonMatchId) ?? null,
+    () =>
+      rankedMatches.find((entry) => entry.match.catalogItemId === comparisonMatchId) ?? null,
     [comparisonMatchId, rankedMatches],
   );
 
   async function runMatch(nextQueryImage: SupplierMatchQueryImage) {
     setUploadError(null);
-    if (!currentSupplierId || isCatalogLoading || blockingCatalogError || catalog.length === 0) {
+    if (engine === "eland") {
+      if (!currentSupplierId || isCatalogLoading || Boolean(blockingCatalogError)) {
+        setUploadError(
+          blockingCatalogError ??
+            (!currentSupplierId
+              ? "Select a supplier before searching the-eland.co."
+              : isCatalogLoading
+                ? "Wait for the supplier catalog to finish loading."
+                : "Resolve the catalog error before searching."),
+        );
+        return;
+      }
+    } else if (!currentSupplierId || isCatalogLoading || blockingCatalogError || catalog.length === 0) {
       setUploadError(
         blockingCatalogError ??
           (!currentSupplierId
@@ -450,6 +634,7 @@ export function SupplierImageManagementDialog({
       catalog,
       currentSupplierId,
       engine,
+      query: engine === "eland" ? elandQueryStore.current.trim() || undefined : undefined,
     });
   }
 
@@ -510,13 +695,63 @@ export function SupplierImageManagementDialog({
     void chooseFile(imageFile);
   }
 
-  function applyMatch(rankedMatch: RankedMatch) {
-    onSelect(rankedMatch.item);
-    setOpen(false);
+  function applyMatch(rankedMatch: RankedMatch): Promise<void> {
+    setApplyError(null);
+    // Local match → same fast path as before: no download, no persistence.
+    if (rankedMatch.item) {
+      onSelect(rankedMatch.item);
+      setComparisonMatchId(null);
+      setOpen(false);
+      return Promise.resolve();
+    }
+    // Eland remote match → download the eland image, persist it into the app's
+    // own storage (Supabase / local Postgres / data-URL), then hand a synthetic
+    // gallery item (carrying the persisted URL) to onSelect. eland URLs are
+    // opaque and may change, so we never leave an eland URL on the node.
+    if (!rankedMatch.match.remoteImageUrl) {
+      setApplyError("This the-eland.co entry has no downloadable image.");
+      return Promise.resolve();
+    }
+    if (!currentSupplierId) {
+      setApplyError("Select a supplier before applying an the-eland.co image.");
+      return Promise.resolve();
+    }
+    // Default to the small thumbnail when present to keep the download cheap;
+    // fall back to the original if the thumbnail is missing (may be null).
+    const downloadUrl =
+      rankedMatch.match.remoteThumbnailUrl ?? rankedMatch.match.remoteImageUrl;
+    // Derive a sensible product type for the synthetic item: prefer the
+    // supplier's first catalog type for the current supplier; fall back to a
+    // known default so the field is non-null.
+    const fallbackProductType: SupplierProductType =
+      (galleryItems.find((g) => g.product.supplierId === currentSupplierId)?.product
+        .productType as SupplierProductType | undefined) ?? "woven-label";
+
+    setIsApplying(true);
+    return persistGeneratedImage(downloadUrl)
+      .then((persisted) => {
+        const synthetic = buildElandGalleryItem(
+          rankedMatch.match,
+          persisted,
+          currentSupplierId,
+          fallbackProductType,
+        );
+        onSelect(synthetic);
+        setComparisonMatchId(null);
+        setOpen(false);
+      })
+      .catch((error: unknown) => {
+        const message =
+          error instanceof Error
+            ? `Could not download the image from the-eland.co: ${error.message}`
+            : "Could not download the image from the-eland.co.";
+        setApplyError(message);
+      })
+      .finally(() => setIsApplying(false));
   }
 
   function openComparison(rankedMatch: RankedMatch) {
-    setComparisonMatchId(rankedMatch.item.id);
+    setComparisonMatchId(rankedMatch.match.catalogItemId);
   }
 
   const searchError =
@@ -527,8 +762,14 @@ export function SupplierImageManagementDialog({
     <Dialog
       open={open}
       onOpenChange={(nextOpen) => {
+        // Block dismissal while a download/persist is in flight so the user
+        // can't walk away mid-apply on an eland match.
+        if (!nextOpen && isApplying) return;
         setOpen(nextOpen);
-        if (!nextOpen) setComparisonMatchId(null);
+        if (!nextOpen) {
+          setComparisonMatchId(null);
+          setApplyError(null);
+        }
       }}
     >
       <DialogTrigger render={trigger} />
@@ -544,7 +785,11 @@ export function SupplierImageManagementDialog({
                   ? "border-sky-500/30 bg-sky-500/10 text-sky-800 dark:text-sky-200"
                   : engine === "local"
                     ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-800 dark:text-yellow-200"
-                    : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200"
+                    : engine === "labelstash"
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
+                      : engine === "eland"
+                        ? "border-violet-500/30 bg-violet-500/10 text-violet-800 dark:text-violet-200"
+                        : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200"
               }
               variant="outline"
             >
@@ -553,7 +798,11 @@ export function SupplierImageManagementDialog({
                 ? "Milvus vector search"
                 : engine === "local"
                   ? "Local image search"
-                  : "Image search"}
+                  : engine === "labelstash"
+                    ? "LabelStash-style search"
+                    : engine === "eland"
+                      ? "the-eland.co portal search"
+                      : "Image search"}
             </Badge>
             {catalog.length ? (
               <span className="text-muted-foreground text-xs">
@@ -567,14 +816,22 @@ export function SupplierImageManagementDialog({
               ? "Search similar images with Milvus"
               : engine === "local"
                 ? "Search similar supplier product images (local)"
-                : "Search similar supplier images"}
+                : engine === "labelstash"
+                  ? "Search this supplier by reference image"
+                  : engine === "eland"
+                    ? "Search the-eland.co by reference image"
+                    : "Search similar supplier images"}
           </DialogTitle>
           <DialogDescription>
             {engine === "milvus"
               ? "Upload a reference image. CLIP embeddings are indexed in Milvus Lite and ranked by cosine similarity within this supplier's catalog."
               : engine === "local"
                 ? "Upload a reference image. Runs entirely on this server using local embeddings — no Python sidecar required. Matches are ranked best-similarity-first within the selected supplier's catalog."
-                : "Upload a reference image. Search only the selected supplier's product images and rank matches from highest to lowest similarity."}
+                : engine === "labelstash"
+                  ? "Upload a reference image. It is compared against the selected supplier's local product images and ranked highest-to-lowest similarity. No image leaves your machine — this runs locally."
+                  : engine === "eland"
+                    ? "Upload a reference image. It is sent to the-eland.co with your portal API key and matched against images your organization previously uploaded at /portal/upload (then indexed). Add a text query to narrow by name, description or tags. Empty results mean nothing is indexed yet — that is normal after a fresh upload."
+                    : "Upload a reference image. Search only the selected supplier's product images and rank matches from highest to lowest similarity."}
           </DialogDescription>
         </DialogHeader>
 
@@ -689,6 +946,10 @@ export function SupplierImageManagementDialog({
               </div>
             ) : null}
 
+            {engine === "eland" ? (
+              <ElandQueryBox disabled={busy} />
+            ) : null}
+
             {queryImage ? (
               <p className="text-muted-foreground text-center text-xs">
                 Drop another image on the preview, or paste with Ctrl/Cmd+V, to replace it.
@@ -700,7 +961,9 @@ export function SupplierImageManagementDialog({
                 type="button"
                 className="w-full"
                 disabled={
-                  !currentSupplierId || Boolean(blockingCatalogError) || catalog.length === 0
+                  engine === "eland"
+                    ? !currentSupplierId || Boolean(blockingCatalogError)
+                    : !currentSupplierId || Boolean(blockingCatalogError) || catalog.length === 0
                 }
                 onClick={() => void runMatch(queryImage)}
               >
@@ -715,7 +978,11 @@ export function SupplierImageManagementDialog({
                   ? "Search is limited to the selected supplier's images. When the Milvus sidecar is running, CLIP embeddings are indexed in Milvus Lite and ranked by cosine similarity; otherwise the local histogram fallback is used. No external LLM analysis."
                   : engine === "local"
                     ? "Search is limited to the selected supplier's images. Matches run entirely on this server using local embeddings — no Python sidecar required. No external LLM analysis."
-                    : "Search is limited to the selected supplier's images. When the CLIP sidecar is running, matches use multi-view visual embeddings plus local feature matching for crop-from-product cases; otherwise the local histogram fallback is used. No external LLM analysis."}
+                    : engine === "labelstash"
+                      ? "Search is limited to the selected supplier's local product images. Matches run entirely on this server using local visual embeddings — no external service is called, nothing is uploaded. The score is a relative ranking signal, shown as % for layout parity."
+                      : engine === "eland"
+                        ? "Your reference image and optional query are sent to the-eland.co with your portal API key. Results come from images your organization previously uploaded at /portal/upload (and indexed) — the API has no per-supplier filter, so narrow with the query box (matches name/description/tags). Scores are a relative ranking signal, not a percentage."
+                        : "Search is limited to the selected supplier's images. When the CLIP sidecar is running, matches use multi-view visual embeddings plus local feature matching for crop-from-product cases; otherwise the local histogram fallback is used. No external LLM analysis."}
               </p>
             </div>
           </aside>
@@ -748,11 +1015,13 @@ export function SupplierImageManagementDialog({
                     </Badge>
                   </div>
                   <p className="text-sm leading-6">
-                    Compared your reference against {matchMutation.data.searchedCount} image
-                    {matchMutation.data.searchedCount === 1 ? "" : "s"} from{" "}
-                    {selectedSupplierName ?? "the selected supplier"}. Results are ranked by fused
-                    visual + color score (higher is closer). Weak top scores mean no catalog photo
-                    is a close match — inspect more than #1.
+                    {engine === "eland"
+                      ? `the-eland.co returned ${matchMutation.data.searchedCount} match${
+                          matchMutation.data.searchedCount === 1 ? "" : "es"
+                        } for your reference image. Results are ranked by the portal similarity score (higher is closer). Empty future results mean nothing is indexed yet — that is normal after a fresh /portal/upload.`
+                      : `Compared your reference against ${matchMutation.data.searchedCount} image${
+                          matchMutation.data.searchedCount === 1 ? "" : "s"
+                        } from ${selectedSupplierName ?? "the selected supplier"}. Results are ranked by fused visual + color score (higher is closer). Weak top scores mean no catalog photo is a close match — inspect more than #1.`}
                   </p>
                   <p className="text-muted-foreground mt-2 font-mono text-[0.68rem]">
                     model: {matchMutation.data.model}
@@ -763,8 +1032,11 @@ export function SupplierImageManagementDialog({
                   <div>
                     <p className="font-heading font-semibold">Most similar images</p>
                     <p className="text-muted-foreground text-xs">
-                      {matchMutation.data.searchedCount} images searched · ranked highest to lowest
-                      score
+                      {engine === "eland"
+                        ? `${matchMutation.data.searchedCount} match${
+                            matchMutation.data.searchedCount === 1 ? "" : "es"
+                          } from the-eland.co · ranked highest to lowest score`
+                        : `${matchMutation.data.searchedCount} images searched · ranked highest to lowest score`}
                     </p>
                   </div>
                   <Badge variant="outline">{matchEngineLabel(matchMutation.data.model)}</Badge>
@@ -773,15 +1045,17 @@ export function SupplierImageManagementDialog({
                 <div className="grid gap-3">
                   {rankedMatches.map((rankedMatch, index) => (
                     <RankedMatchCard
-                      key={rankedMatch.item.id}
+                      key={rankedMatch.match.catalogItemId}
                       rankedMatch={rankedMatch}
                       rank={index + 1}
-                      selected={selectedItemId === rankedMatch.item.id}
+                      selected={selectedItemId === rankedMatch.match.catalogItemId}
                       onCompare={() => openComparison(rankedMatch)}
                     />
                   ))}
                 </div>
               </>
+            ) : matchMutation.data && engine === "eland" ? (
+              <ElandEmptyResults portalUploadUrl={matchMutation.data.portalUploadUrl} />
             ) : searchError ? (
               <div className="grid min-h-72 place-items-center rounded-xl border border-dashed p-8 text-center">
                 <div className="max-w-md space-y-3">
@@ -861,24 +1135,41 @@ export function SupplierImageManagementDialog({
                 </div>
 
                 <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-5 lg:grid-cols-2">
-                  {[
-                    {
-                      title: "Target image",
-                      subtitle: queryImage?.name ?? "Uploaded reference",
-                      src: queryImage?.url ?? comparisonMatch.item.variant.image.url,
-                      alt: queryImage?.name ?? "Target image",
-                      // Target is an uploaded reference only — do not copy product
-                      // metadata from the compared catalog item.
-                      fields: [] as ComparisonField[],
-                    },
-                    {
-                      title: "Compared image",
-                      subtitle: comparisonMatch.item.variant.image.name,
-                      src: comparisonMatch.item.variant.image.url,
-                      alt: comparisonMatch.item.variant.image.name,
-                      fields: buildComparisonFields(comparisonMatch.item),
-                    },
-                  ].map((panel) => (
+                  {(() => {
+                    const comparedImageSrc =
+                      comparisonMatch.match.remoteThumbnailUrl ??
+                      comparisonMatch.match.remoteImageUrl ??
+                      comparisonMatch.item?.variant.image.url ??
+                      "";
+                    const comparedImageAlt =
+                      comparisonMatch.match.remoteName ??
+                      comparisonMatch.item?.variant.image.name ??
+                      "Compared image";
+                    const comparedFields = comparisonMatch.item
+                      ? buildComparisonFields(comparisonMatch.item)
+                      : buildElandComparisonFields(comparisonMatch.match);
+                    return [
+                      {
+                        title: "Target image",
+                        subtitle: queryImage?.name ?? "Uploaded reference",
+                        src: queryImage?.url ?? comparedImageSrc,
+                        alt: queryImage?.name ?? "Target image",
+                        // Target is an uploaded reference only — do not copy product
+                        // metadata from the compared catalog item.
+                        fields: [] as ComparisonField[],
+                      },
+                      {
+                        title: "Compared image",
+                        subtitle:
+                          comparisonMatch.match.remoteName ??
+                          comparisonMatch.item?.variant.image.name ??
+                          "the-eland.co match",
+                        src: comparedImageSrc,
+                        alt: comparedImageAlt,
+                        fields: comparedFields,
+                      },
+                    ];
+                  })().map((panel) => (
                     <section
                       key={panel.title}
                       className="bg-muted/20 flex min-h-0 flex-col overflow-hidden rounded-xl border"
@@ -890,20 +1181,29 @@ export function SupplierImageManagementDialog({
                           </p>
                           <p className="truncate text-sm font-medium">{panel.subtitle}</p>
                         </div>
-                        {panel.title === "Compared image" ? (
+                        {panel.title === "Compared image" && comparisonMatch.supplier ? (
                           <Badge variant="secondary">
                             {comparisonMatch.supplier.company.companyName}
                           </Badge>
                         ) : null}
+                        {panel.title === "Compared image" && !comparisonMatch.item ? (
+                          <Badge variant="outline">the-eland.co</Badge>
+                        ) : null}
                       </div>
                       <div className="grid min-h-0 flex-1 gap-4 p-4">
                         <div className="bg-background min-h-[18rem] overflow-hidden rounded-lg border">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={panel.src}
-                            alt={panel.alt}
-                            className="h-full w-full object-contain"
-                          />
+                          {panel.src ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={panel.src}
+                              alt={panel.alt}
+                              className="h-full w-full object-contain"
+                            />
+                          ) : (
+                            <div className="text-muted-foreground grid h-full place-items-center p-4 text-center text-sm">
+                              No image available
+                            </div>
+                          )}
                         </div>
                         {panel.fields.length ? (
                           <dl className="grid grid-cols-2 gap-2">
@@ -926,24 +1226,56 @@ export function SupplierImageManagementDialog({
                 </div>
 
                 <div className="bg-muted/30 flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4">
-                  <p className="text-muted-foreground text-sm">
-                    Review the pair, then apply the selected image.
-                  </p>
+                  <div className="min-w-0 space-y-1">
+                    <p className="text-muted-foreground text-sm">
+                      {isApplying
+                        ? "Downloading and saving the image from the-eland.co…"
+                        : "Review the pair, then apply the selected image."}
+                    </p>
+                    {applyError ? (
+                      <p className="text-sm font-medium text-destructive">{applyError}</p>
+                    ) : null}
+                  </div>
                   <div className="flex items-center gap-2">
-                    <Button type="button" variant="outline" onClick={() => setComparisonMatchId(null)}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setComparisonMatchId(null)}
+                      disabled={isApplying}
+                    >
                       Keep browsing
                     </Button>
                     <Button
                       type="button"
                       onClick={() => {
-                        applyMatch(comparisonMatch);
-                        setComparisonMatchId(null);
+                        // applyMatch is async for eland matches (download →
+                        // persist → onSelect). It closes the compare overlay
+                        // and the dialog itself on success; on failure it
+                        // leaves both open with `applyError` shown above.
+                        void applyMatch(comparisonMatch);
                       }}
-                      disabled={selectedItemId === comparisonMatch.item.id}
+                      disabled={
+                        isApplying ||
+                        (comparisonMatch.item
+                          ? selectedItemId === comparisonMatch.item.id
+                          : !comparisonMatch.match.remoteImageUrl)
+                      }
                     >
-                      {selectedItemId === comparisonMatch.item.id
-                        ? "Already selected"
-                        : "Use this image"}
+                      {isApplying
+                        ? "Saving…"
+                        : comparisonMatch.item
+                          ? selectedItemId === comparisonMatch.item.id
+                            ? "Already selected"
+                            : "Use this image"
+                          : !comparisonMatch.match.remoteImageUrl
+                            ? "No source image"
+                            : "Use this image"}
+                      {isApplying ? (
+                        <LoaderCircle
+                          className="ml-2 size-4 animate-spin motion-reduce:animate-none"
+                          aria-hidden
+                        />
+                      ) : null}
                     </Button>
                   </div>
                 </div>

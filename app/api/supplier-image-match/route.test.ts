@@ -39,10 +39,12 @@ describe("POST /api/supplier-image-match", () => {
     const matchPictureSherlock = vi.fn<SupplierImageMatcher>();
     const matchMilvus = vi.fn<SupplierImageMatcher>();
     const matchLocal = vi.fn<SupplierImageMatcher>();
+    const matchEland = vi.fn<SupplierImageMatcher>();
     const handler = createSupplierImageMatchPostHandler({
       matchPictureSherlock,
       matchMilvus,
       matchLocal,
+      matchEland,
     });
     const response = await handler(
       post({
@@ -71,10 +73,12 @@ describe("POST /api/supplier-image-match", () => {
     });
     const matchMilvus = vi.fn<SupplierImageMatcher>();
     const matchLocal = vi.fn<SupplierImageMatcher>();
+    const matchEland = vi.fn<SupplierImageMatcher>();
     const handler = createSupplierImageMatchPostHandler({
       matchPictureSherlock,
       matchMilvus,
       matchLocal,
+      matchEland,
     });
     const response = await handler(post(validBody));
 
@@ -108,10 +112,12 @@ describe("POST /api/supplier-image-match", () => {
       model: "milvus-clip-vit-base-patch32",
     });
     const matchLocal = vi.fn<SupplierImageMatcher>();
+    const matchEland = vi.fn<SupplierImageMatcher>();
     const handler = createSupplierImageMatchPostHandler({
       matchPictureSherlock,
       matchMilvus,
       matchLocal,
+      matchEland,
     });
     const response = await handler(post({ ...validBody, engine: "milvus" }));
 
@@ -145,6 +151,7 @@ describe("POST /api/supplier-image-match", () => {
       matchPictureSherlock,
       matchMilvus,
       matchLocal,
+      matchEland: vi.fn<SupplierImageMatcher>(),
     });
     const response = await handler(post({ ...validBody, engine: "local" }));
 
@@ -168,6 +175,7 @@ describe("POST /api/supplier-image-match", () => {
         .mockRejectedValue(new Error("Embedding failed")),
       matchMilvus: vi.fn<SupplierImageMatcher>(),
       matchLocal: vi.fn<SupplierImageMatcher>(),
+      matchEland: vi.fn<SupplierImageMatcher>(),
     });
     const response = await handler(post(validBody));
 
@@ -190,6 +198,7 @@ describe("POST /api/supplier-image-match", () => {
       }),
       matchMilvus: vi.fn<SupplierImageMatcher>(),
       matchLocal: vi.fn<SupplierImageMatcher>(),
+      matchEland: vi.fn<SupplierImageMatcher>(),
     });
     const response = await handler(post(validBody));
 
