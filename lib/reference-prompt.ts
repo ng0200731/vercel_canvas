@@ -241,22 +241,22 @@ export function compileReferencePrompt(
     return { prompt: userPrompt, imageUrls: [] };
   }
 
-  // OpenAI images.edit applies the mask only to image[0]. When a mask is
-  // attached, drop additional image references from the wire payload — the
-  // server sends only the base image (bounding-box composite handles
-  // coverage, see runMaskedTextureTransfer). Keep the non-image references
-  // (pantone swatches) and preserve all reference names in the prompt
-  // mapping so the model still has the @alias context as text.
+  // When a mask is attached we STILL send every image reference to the
+  // provider, not just the base. Historically this code dropped additional
+  // images because "OpenAI images.edit applies the mask only to image[0]" —
+  // but that only constrains WHICH image the mask clips, not how many we may
+  // send. Dropping the @product image forced the model to guess the product
+  // from its alias name, so a "paste @product in this region" prompt came
+  // back as a vague repaint rather than a real placement. Now: mask-base is
+  // image[0] (so the mask clips it), and every other image reference is
+  // attached as image[1..] so the model has real pixels to draw from. The
+  // `maskConstraint` below tells the model those later images are the source
+  // to place INSIDE the transparent region. Non-image references (pantone
+  // swatches) are always attached as before.
   const maskCarrier = ordered.find((reference) => reference.maskUrl);
-  let droppedForMask: ProviderImageReference[] = [];
+  const droppedForMask: ProviderImageReference[] = [];
   if (maskCarrier) {
     ordered = [maskCarrier, ...ordered.filter((reference) => reference !== maskCarrier)];
-    droppedForMask = ordered.filter(
-      (reference) => reference !== maskCarrier && reference.source === "image",
-    );
-    ordered = ordered.filter(
-      (reference) => reference === maskCarrier || reference.source !== "image",
-    );
   }
 
   const mapping = ordered
@@ -283,10 +283,26 @@ export function compileReferencePrompt(
     colorTransferConstraint(userPrompt, ordered),
     objectOrMaterialConstraint(userPrompt, ordered, droppedForMask),
   ].filter((constraint): constraint is string => Boolean(constraint));
+  // Auxiliary attached image references (image[1..]) that the model should
+  // draw from when filling the transparent region. Empty for a pure recolor
+  // (only the base + a pantone swatch).
+  const auxiliaryImages = maskCarrier
+    ? ordered.filter((reference) => reference !== maskCarrier && reference.source === "image")
+    : [];
+  const auxiliaryPasteLines = auxiliaryImages.map(
+    (reference, index) =>
+      `- Provider image ${index + 2} / @${reference.alias}: this is the SOURCE to place INTO the transparent region of @${maskCarrier!.alias}. Paste this image's actual content (subject, product, texture, colour) into the masked area, fitted to the region. Respect @${maskCarrier!.alias}'s light direction and blend only the boundary seam — do not recolour or stylise the pasted content.`,
+  );
   const maskConstraint = maskCarrier
     ? [
         "MASK GUIDANCE (the attached mask marks the exact edit region):",
-        `- @${maskCarrier.alias} is the base image the user wants to edit.`,
+        `- @${maskCarrier.alias} is the base image the user wants to edit (provider image 1).`,
+        ...(auxiliaryPasteLines.length > 0
+          ? [
+              "The additional attached image(s) are real source pixels to place INSIDE the mask — not textual cues:",
+              ...auxiliaryPasteLines,
+            ]
+          : []),
         `- An alpha mask is attached: transparent (alpha 0) = the region to edit, opaque = keep unchanged. Regenerate the pixels inside the transparent region ONLY. Every opaque pixel must be preserved exactly as in @${maskCarrier.alias} — no recoloring outside the mask, no matter how visually similar the surrounding area looks.`,
         `- The user's stroke is a literal selection, not a hint to recolor a larger object. Do NOT expand the edit to neighbouring regions, panels, seams, straps, or fabric of the same material. The edit shape is the mask shape — nothing more.`,
         `- Keep every part of @${maskCarrier.alias} unchanged outside the mask: silhouette, background, framing, print, logos, lighting, shadows, and every other visible detail.`,

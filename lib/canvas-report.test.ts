@@ -283,6 +283,7 @@ describe("buildCanvasReport", () => {
       "Supplier details",
       "Pantone",
       "Generic node",
+      "Painted images",
       "Output and input prompt",
     ]);
     expect(report.project.customerName).toBe("Harborline Retail Ltd.");

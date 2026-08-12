@@ -121,6 +121,7 @@ export interface XiangsuGenerateDiagnostics {
     description?: string;
   }>;
   formFields: Record<string, string>;
+  editMode?: "placement" | "color-only" | "texture";
 }
 
 interface XiangsuGeneratorOptions {
@@ -267,6 +268,29 @@ async function imageDimensions(blob: Blob): Promise<{ width: number; height: num
     // fall through to null
   }
   return null;
+}
+
+/**
+ * Different ASPECT between the served base image and the mask means the mask
+ * was drawn against a different image/variant (or a stale mask survived a
+ * variant swap). A pure pixel-count mismatch (same aspect, different scale) is
+ * benign — we resample the base into the mask's grid — but an aspect mismatch
+ * would warp the user's highlight, so reject loudly instead of silently
+ * producing a misaligned edit. Exported for unit testing.
+ */
+export function assertMaskAspectCompatible(
+  baseDims: { width: number; height: number },
+  maskDims: { width: number; height: number },
+): void {
+  if (!baseDims.height || !maskDims.height) return;
+  const baseAspect = baseDims.width / baseDims.height;
+  const maskAspect = maskDims.width / maskDims.height;
+  const ASPECT_EPSILON = 1e-3; // ~0.1%
+  if (Math.abs(baseAspect - maskAspect) > ASPECT_EPSILON) {
+    throw new Error(
+      `Mask (aspect ${maskAspect.toFixed(3)}) doesn't match the source image (aspect ${baseAspect.toFixed(3)}). Redraw the mask on the current image.`,
+    );
+  }
 }
 
 function isOpenAiEditEligible(input: XiangsuGenerateInput): boolean {
@@ -685,37 +709,54 @@ async function runMaskedTextureTransfer(
   const baseBuffer = Buffer.from(await baseBlob.arrayBuffer());
   const maskBuffer = Buffer.from(await maskBlob.arrayBuffer());
   const baseDims = await imageDimensions(baseBlob);
-  const baseWidth = baseDims?.width ?? 0;
-  const baseHeight = baseDims?.height ?? 0;
+  const maskDims = await imageDimensions(maskBlob);
 
-  // Re-encode the base as PNG so the provider receives a clean image
-  // regardless of the uploaded format (e.g. WebP).
-  const basePngBuffer = await sharp(baseBuffer).png().toBuffer();
+  // The mask is GROUND TRUTH for the coordinate grid: it was built client-side
+  // at the natural dims of the image the user actually saw and drew on (see
+  // createMaskFromG2Regions + g2-node.onGenerate). The served base is the same
+  // image, so its aspect should match the mask's aspect; only their pixel
+  // counts may differ (e.g. a scaled upload at MAX_DIMENSION=1280). The previous
+  // version resized the MASK onto the base's pixel dims with `fit: "fill"`,
+  // which independently stretches each axis — a different aspect deforms which
+  // pixels are transparent and the edit lands shifted/scaled relative to the
+  // highlight. We instead resample the BASE into the MASK's grid and send the
+  // mask UNSTRETCHED, so the transparent region is exactly where the user drew.
+  //
+  // Guard first (mirrors the sibling masked path at the `compiled.maskUrl`
+  // branch above): different ASPECT means the mask was drawn against a
+  // different image/variant — reject loudly instead of silently warping. A pure
+  // pixel-count mismatch (same aspect) is benign and resolved by the resample.
+  if (baseDims && maskDims && baseDims.height > 0 && maskDims.height > 0) {
+    assertMaskAspectCompatible(baseDims, maskDims);
+  }
 
-  // Re-encode the mask to a PNG with the same dimensions as the base so it
-  // aligns pixel-for-pixel with the base image (OpenAI images.edit requires
-  // mask dims == image dims) and so we can extract a pixel-aligned alpha map
-  // in the base's coordinate space for the local composite step.
-  //
-  // Mask convention (OpenAI images.edit, and this codebase): alpha = 0
-  // (transparent) = the region to edit; alpha = 255 (opaque) = keep. `sharp`
-  // preserves the mask's alpha channel.
-  //
-  // The mask's alpha is binary (0/255) on the client. Sharp's default resize
-  // resampler is bilinear, which would smear the binary boundary into
-  // mid-range alpha values — a thin 1px stroke can interpolate entirely
-  // above the ALPHA_THRESHOLD (128) downstream and silently vanish, or
-  // smear into a fat band. Use nearest-neighbor so the boundary stays
-  // binary on resize. ensureAlpha() guarantees channel 3 exists before the
-  // later extractChannel(3) in alphaMapFromBuffer.
-  const maskPngBuffer =
+  // Pin every downstream coordinate space (alpha map, bbox, size, composite)
+  // to the mask's native grid — the grid the user drew on.
+  const baseWidth = maskDims?.width ?? baseDims?.width ?? 0;
+  const baseHeight = maskDims?.height ?? baseDims?.height ?? 0;
+
+  // Re-encode the mask as PNG preserving its native dims (`ensureAlpha`
+  // guarantees channel 3 exists for `alphaMapFromBuffer` downstream). The mask
+  // is NOT resized here — its transparent region must stay exactly where the
+  // user drew it. Mask convention (OpenAI images.edit, and this codebase):
+  // alpha = 0 (transparent) = the region to edit; alpha = 255 (opaque) = keep.
+  const maskPngBuffer = await sharp(maskBuffer).ensureAlpha().png().toBuffer();
+
+  // Re-encode the base as PNG and resample it INTO the mask's grid. The aspect
+  // guard above guarantees aspect matches, so `fit: "fill"` is a near-1:1
+  // resample that does not deform content. kernel: "nearest" avoids smearing
+  // detail; acceptable for the base (photographic) since the aspect match makes
+  // the scale factor uniform across both axes. Base is the only image sent to
+  // the provider (other image refs were dropped by compileReferencePrompt), so
+  // it must share the mask's grid for the provider's mask clip to land right.
+  const basePngBuffer =
     baseWidth && baseHeight
-      ? await sharp(maskBuffer)
+      ? await sharp(baseBuffer)
           .ensureAlpha()
           .resize(baseWidth, baseHeight, { fit: "fill", kernel: "nearest" })
           .png()
           .toBuffer()
-      : await sharp(maskBuffer).ensureAlpha().png().toBuffer();
+      : await sharp(baseBuffer).png().toBuffer();
 
   // --- Prompt -------------------------------------------------------------
   // Use the user's own (reference-resolved) instruction from
@@ -771,19 +812,51 @@ async function runMaskedTextureTransfer(
   form.append("response_format", "b64_json");
   form.append("output_format", "png");
   form.append("image[]", new Blob([new Uint8Array(basePngBuffer)], { type: "image/png" }), "base.png");
-  // Send the actual mask PNG (base-aligned dims, OpenAI edit convention:
-  // transparent = edit, opaque = keep) so the model regenerates only inside
-  // it. This is the primary shape constraint — the local composite below
-  // only feathers the seam and guards against drift outside the mask.
+  // Attach every auxiliary image reference (image[1..]) so the model has real
+  // source pixels to draw from when filling the transparent region — e.g. a
+  // "paste @product in this region" edit needs the product image, not just its
+  // alias name. compileReferencePrompt no longer drops image refs when a mask
+  // is attached, so `ordered` carries them after the maskCarrier (base).
+  const auxiliaryImageRefs = ordered.filter((reference) => reference !== maskCarrier && reference.source === "image");
+  const auxiliaryImageUrls: string[] = [];
+  for (const reference of auxiliaryImageRefs) {
+    if (!reference.url) continue;
+    try {
+      const auxBlob = await blobFromReferenceUrl(reference.url, fetcher, signal);
+      const auxBuffer = Buffer.from(await auxBlob.arrayBuffer());
+      const auxPngBuffer = await sharp(auxBuffer).ensureAlpha().png().toBuffer();
+      form.append("image[]", new Blob([new Uint8Array(auxPngBuffer)], { type: "image/png" }), `${reference.alias}.png`);
+      auxiliaryImageUrls.push(reference.url);
+    } catch {
+      // If an auxiliary fetch fails, continue without it — the prompt still
+      // names the alias and the object/material constraint guides the model.
+    }
+  }
+  // Send the actual mask PNG (OpenAI edit convention: transparent = edit,
+  // opaque = keep) so the model regenerates only inside it. This is the primary
+  // shape constraint — the local composite below only feathers the seam and
+  // guards against drift outside the mask. The mask is sent UNSTRETCHED, in the
+  // grid the user drew on.
   if (maskPngBuffer.length > 0) {
     form.append("mask", new Blob([new Uint8Array(maskPngBuffer)], { type: "image/png" }), "mask.png");
   }
-  if (input.matchSourceSize && baseDims) {
-    const providerSize = sizeWithinProviderBounds(baseDims);
-    form.append("size", `${providerSize.width}x${providerSize.height}`);
-  } else {
-    form.append("size", gptSize);
-  }
+
+  // Declared output size MUST follow the grid we actually send (base + mask are
+  // at maskDims — the user's drawing grid). Previously, when `matchSourceSize`
+  // was off this sent an unrelated `gptSize` (e.g. 1024x1024) while base+mask
+  // were at natural dims; a relay that resamples its input to `size` before
+  // applying the mask then shifted the mask's pixel grid and the edit landed
+  // off-target. With a mask attached the output is pixel-aligned to the base, so
+  // size is derived from baseWidth/baseHeight (= maskDims) for both modes. The
+  // user's `size`/`resolution` selectors still control the quality tier via
+  // `gptQuality` above; the masked path ignores them for output dims on
+  // purpose. `sizeWithinProviderBounds` clamps to the 16-px step + provider
+  // min/max px so the declared size stays relay-acceptable.
+  const providerSize =
+    baseWidth && baseHeight
+      ? sizeWithinProviderBounds({ width: baseWidth, height: baseHeight })
+      : null;
+  form.append("size", providerSize ? `${providerSize.width}x${providerSize.height}` : gptSize);
 
   const result = await callGptImageEdit(editUrl, editAuth, form, fetcher, signal);
 
@@ -794,23 +867,55 @@ async function runMaskedTextureTransfer(
   // nothing drifts outside the mask. A color-only edit keeps a tighter edge
   // to preserve the original pattern; an object edit feathers more so the
   // new material blends with the surrounding garment.
+  //
+  // NOTE: compositeAlphaShape resizes the provider's output to its own
+  // `width×height` derived from `baseBuffer`'s metadata (the ORIGINAL served
+  // base, not the resampled grid). The mask passed here is `maskPngBuffer`,
+  // which is in the mask's native dims. alphaMapFromBuffer inside the
+  // composite resamples the mask to the base's metadata dims with
+  // kernel: "nearest" — aspect already matches (guarded above), so this is a
+  // near-1:1 resample and the transparent region stays aligned. To keep the
+  // composite in a single coordinate space we pass the RESAMPLED base
+  // (`basePngBuffer`, already at maskDims) so its metadata dims equal the
+  // mask's grid, and the provider output is resized to that same grid.
   let finalBuffer: Buffer;
+  // Edit mode: a "placement" edit has a real auxiliary image attached (a
+  // product photo to paste). Those need a TIGHT seam — the pasted content's
+  // edges must stay crisp, not be dilated/feathered into a halo (which is what
+  // reads as "the region is now blurred"). Color-only stays tight to preserve
+  // the original pattern; texture/material keeps the existing feathering so a
+  // new material blends with surrounding fabric.
+  const isPlacement =
+    !isColorOnly &&
+    ordered.some((reference) => reference !== maskCarrier && reference.source === "image");
+  const editMode: "placement" | "color-only" | "texture" = isPlacement
+    ? "placement"
+    : isColorOnly
+      ? "color-only"
+      : "texture";
   if (baseWidth && baseHeight && maskPngBuffer.length > 0) {
-    // For a thin / small mask (bbox shorter side < ~24px) the default 2px
-    // dilate only rounds the seam a couple of pixels — too little to give
-    // the provider a usable paint area, so the recolor can come back thin or
-    // patchy. Bump dilate/feather for non-color-only edits to widen the seam
-    // round and blend the new material into the surrounding fabric. Color-
-    // only edits keep a tight edge so the original pattern is preserved.
-    // This only affects the LOCAL composite — the mask we send to the
-    // provider stays the user's literal selection.
     const bboxShortSide = maskBboxBase
       ? Math.min(maskBboxBase.width, maskBboxBase.height)
       : 0;
     const isThinMask = bboxShortSide > 0 && bboxShortSide < 24;
-    const dilate = isColorOnly ? 2 : isThinMask ? 6 : 2;
-    const feather = isColorOnly ? 3 : isThinMask ? 8 : 6;
-    finalBuffer = await compositeAlphaShape(baseBuffer, result.buffer, maskPngBuffer, {
+    let dilate: number;
+    let feather: number;
+    if (isPlacement) {
+      // Crisp seam — preserve the pasted product's edge. A 1px feather just
+      // softens the single-pixel boundary anti-alias; no dilation.
+      dilate = 0;
+      feather = 2;
+    } else if (isColorOnly) {
+      dilate = 2;
+      feather = 3;
+    } else if (isThinMask) {
+      dilate = 6;
+      feather = 8;
+    } else {
+      dilate = 2;
+      feather = 6;
+    }
+    finalBuffer = await compositeAlphaShape(basePngBuffer, result.buffer, maskPngBuffer, {
       dilate,
       feather,
     });
@@ -833,9 +938,11 @@ async function runMaskedTextureTransfer(
       model: input.model,
       prompt: passPromptWithCue,
       "image[0]": maskCarrier.url,
+      ...Object.fromEntries(auxiliaryImageUrls.map((url, index) => [`image[${index + 1}]`, url])),
       ...(maskPngBuffer.length > 0 ? { mask: maskCarrier.maskUrl ?? "(attached png)" } : {}),
       ...(maskBboxBase ? { maskBbox: `${maskBboxBase.minX},${maskBboxBase.minY} ${maskBboxBase.maxX},${maskBboxBase.maxY} (${maskBboxBase.width}x${maskBboxBase.height})` } : {}),
       size: String(form.get("size") ?? ""),
+      editMode,
     },
   };
 

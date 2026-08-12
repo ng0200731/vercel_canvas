@@ -378,3 +378,49 @@ describe("alphaMapFromBuffer (skip redundant resize on same-size input)", () => 
   });
 });
 
+describe("compositeAlphaShape preserves mask region across same-aspect rescales", () => {
+  // Regression for "edit lands in the wrong spot": when the base image and the
+  // mask share an aspect but differ in pixel count, the provider-aligned grid is
+  // the MASK's grid. compositeAlphaShape resamples the mask (kernel: nearest)
+  // to the base's metadata dims; same-aspect → near-1:1 → the transparent
+  // rectangle must map to the same RELATIVE position, not drift toward center
+  // as a fit:"fill" aspect deformation would.
+
+  it("keeps the transparent rectangle in the same relative spot after a same-aspect rescale", async () => {
+    // Mask: 60x40 (3:2). Transparent rectangle at top-left: x[4..11], y[2..7].
+    const maskW = 60;
+    const maskH = 40;
+    const rect = { x: 4, y: 2, w: 8, h: 6 };
+    const mask = await makeMaskPng(maskW, maskH, rect);
+
+    // Base + edited at a DIFFERENT same-aspect size (120x80). compositeAlphaShape
+    // derives width/height from the base's metadata (120x80) and resamples the
+    // mask (60x40) up to 120x80 with kernel: nearest — a 2x uniform scale.
+    const baseW = 120;
+    const baseH = 80;
+    const base = await makeSolidPng(baseW, baseH, 0, 0, 0);
+    const edited = await makeSolidPng(baseW, baseH, 255, 255, 255);
+
+    const out = await compositeAlphaShape(base, edited, mask, { feather: 0, dilate: 0 });
+    const { data } = await sharp(out).raw().toBuffer({ resolveWithObject: true });
+
+    // After a 2x scale the transparent rectangle maps to x[8..23], y[4..15].
+    // A pixel inside that scaled rectangle must be edited (white).
+    const insideIdx = (10 * baseW + 16) * 4;
+    expect(data[insideIdx]).toBe(255);
+    expect(data[insideIdx + 1]).toBe(255);
+    expect(data[insideIdx + 2]).toBe(255);
+
+    // A pixel OUTSIDE the rectangle (top-left corner of the image, well clear of
+    // the mask) must stay base (black).
+    const outsideIdx = (1 * baseW + 1) * 4;
+    expect(data[outsideIdx]).toBe(0);
+    expect(data[outsideIdx + 1]).toBe(0);
+    expect(data[outsideIdx + 2]).toBe(0);
+
+    // The opposite corner — far from the top-left mask — must also stay base.
+    const farIdx = ((baseH - 2) * baseW + (baseW - 2)) * 4;
+    expect(data[farIdx]).toBe(0);
+  });
+});
+

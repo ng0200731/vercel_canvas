@@ -105,6 +105,7 @@ import {
   type ConnectedImageReference,
   type ConnectedInputReference,
   type ConnectedOutputState,
+  type ConnectedPantoneReference,
   type G2ImageReferences,
 } from "./canvas-context";
 import { NodePalette } from "./node-palette";
@@ -119,6 +120,7 @@ import { InputNode } from "./nodes/input-node";
 import { ImageNode } from "./nodes/image-node";
 import { NoteNode } from "./nodes/note-node";
 import { OutputNode } from "./nodes/output-node";
+import { PaintedNode } from "./nodes/painted-node";
 import { PantoneNode } from "./nodes/pantone-node";
 import { ProductNode } from "./nodes/product-node";
 import { SupplerNode } from "./nodes/suppler-node";
@@ -144,6 +146,7 @@ const CANVAS_NODE_TYPES: NodeTypes = {
   action: ActionNode,
   pantone: PantoneNode,
   g2: G2Node,
+  painted: PaintedNode,
 };
 
 const CANVAS_EDGE_TYPES: EdgeTypes = { deletable: DeletableEdge };
@@ -674,12 +677,18 @@ function findG2ImageReferences(
   const nodesById = new Map(nodes.map((node) => [node.id, node] as const));
   const seen = new Set<string>();
   const mainRefs: ConnectedImageReference[] = [];
-  const otherRefs: ConnectedImageReference[] = [];
+  const otherRefs: ConnectedInputReference[] = [];
 
-  function classify(edge: CanvasEdge, ref: ConnectedImageReference): void {
+  function classify(edge: CanvasEdge, ref: ConnectedInputReference): void {
     const role = (edge.data as { g2Role?: unknown } | undefined)?.g2Role;
     if (role === "main") {
-      mainRefs.push(ref);
+      // Only an image can be the main (mask carrier). A Pantone dropped on the
+      // "main" area can't carry a mask → route it to references instead.
+      if (ref.kind === "image") {
+        mainRefs.push(ref);
+      } else {
+        otherRefs.push(ref);
+      }
     } else if (role === "reference") {
       otherRefs.push(ref);
     } else {
@@ -695,9 +704,9 @@ function findG2ImageReferences(
     const node = nodesById.get(otherNodeId);
     if (!node) continue;
 
-    const push = (ref: Omit<ConnectedImageReference, "edgeId" | "nodeId">) => {
+    const push = (ref: Omit<ConnectedImageReference, "edgeId" | "nodeId"> | Omit<ConnectedPantoneReference, "edgeId" | "nodeId">) => {
       seen.add(otherNodeId);
-      classify(edge, { edgeId: edge.id, nodeId: otherNodeId, ...ref } as ConnectedImageReference);
+      classify(edge, { ...ref, edgeId: edge.id, nodeId: otherNodeId } as ConnectedInputReference);
     };
 
     if (node.type === "imageInput") {
@@ -791,11 +800,43 @@ function findG2ImageReferences(
       push({ kind: "image", alias, label: alias, imageUrl, masks: [] });
       continue;
     }
+
+    if (node.type === "pantone") {
+      // Pantone is a color-only source — no image URL, no mask. Surface it as
+      // a pantone reference so the G2 node renders the same solid-color swatch
+      // chip the Generate node does (see generate-node.tsx). Identical guard to
+      // findConnectedInputReferences: no hex chosen yet → skip, so nothing
+      // renders until a real color is picked, matching the Generate behavior.
+      const swatchHex =
+        typeof node.data.hex === "string" && node.data.hex.startsWith("#") ? node.data.hex : null;
+      if (!swatchHex) continue;
+
+      const name =
+        typeof node.data.name === "string" && node.data.name.trim() ? node.data.name.trim() : null;
+      const code =
+        typeof node.data.code === "string" && node.data.code.trim() ? node.data.code.trim() : null;
+      const alias =
+        typeof node.data.alias === "string" && node.data.alias.trim()
+          ? node.data.alias.trim()
+          : (name ?? code ?? "pantone");
+      const label = name
+        ? name
+            .split("-")
+            .filter(Boolean)
+            .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+            .join(" ")
+        : (code ?? "Pantone");
+      push({ kind: "pantone", alias, label, swatchHex });
+      continue;
+    }
   }
 
-  // No explicit main edge and exactly one un_ROLEd reference → promote it to main.
+  // No explicit main edge and exactly one un_ROLEd reference → promote it to
+  // main — but ONLY if that reference is an image (Pantone can't be the mask
+  // carrier). A lone Pantone stays a reference; the user must still add an
+  // image to be the main.
   let references = otherRefs;
-  if (mainRefs.length === 0 && otherRefs.length === 1) {
+  if (mainRefs.length === 0 && otherRefs.length === 1 && otherRefs[0]!.kind === "image") {
     mainRefs.push(otherRefs[0]!);
     references = [];
   }
@@ -1196,7 +1237,11 @@ function Editor({
     (g2NodeId: string, sourceNodeId: string, role: "main" | "reference") => {
       const source = nodesRef.current.find((node) => node.id === sourceNodeId);
       if (!source || sourceNodeId === g2NodeId) return false;
-      const imageType = ["image", "imageOutput", "imageInput", "suppler", "product"].includes(
+      // Accept any image-bearing node OR a Pantone (color-only) node. A
+      // Pantone dropped on "main" is silently rerouted to "reference" by
+      // findG2ImageReferences (it can't carry a mask), so allow the edge here
+      // and let the role resolver sort it out.
+      const imageType = ["image", "imageOutput", "imageInput", "suppler", "product", "pantone"].includes(
         source.type ?? "",
       );
       if (!imageType) return false;

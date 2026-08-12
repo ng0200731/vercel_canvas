@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS public.canvas_nodes (
   type       text NOT NULL CHECK (
     type IN (
       'note', 'image', 'group', 'imageInput', 'generate', 'imageOutput',
-      'suppler', 'product', 'action', 'pantone', 'g2'
+      'suppler', 'product', 'action', 'pantone', 'g2', 'painted'
     )
   ),
   position   jsonb NOT NULL,

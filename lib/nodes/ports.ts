@@ -13,6 +13,7 @@ export const NODE_PORT_COLORS: Record<NodeType, string> = {
   action: "#f43f5e", // rose
   pantone: "#f97316", // orange
   g2: "#ef4444", // red
+  painted: "#8b5cf6", // violet
 };
 
 /** Default connection wire color. */

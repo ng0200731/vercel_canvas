@@ -33,6 +33,7 @@ import {
   type ImageGenerationOutputFormat,
   type ImageGenerationResolution,
   type ImageGenerationSize,
+  type ImageGenerationReference,
   imageGenerationErrorSchema,
   imageGenerationResponseSchema,
   normalizeImageGenerationModel,
@@ -281,13 +282,17 @@ export function G2Node({ id, data, parentId, selected }: NodeProps<G2CanvasNode>
       if (!maskUrl) throw new Error("Failed to get mask URL");
 
       // Build the reference list: main image (with mask) + each reference.
-      const referenceList: Array<{ kind: "image"; alias: string; url: string; maskUrl?: string }> = [
+      // References may be images OR Pantone swatches (kind: "pantone") — the
+      // server turns a Pantone into a solid-color PNG swatch + color-transfer
+      // constraint (compileReferencePrompt), so it needs no image URL.
+      const referenceList: ImageGenerationReference[] = [
         { kind: "image", alias: mainImageAlias ?? "main", url: mainImageUrl, maskUrl },
-        ...references.map((r, i) => ({
-          kind: "image" as const,
-          alias: r.alias ?? `ref-${i + 1}`,
-          url: r.imageUrl,
-        })),
+        ...references.map((r): ImageGenerationReference => {
+          if (r.kind === "pantone") {
+            return { kind: "pantone", alias: r.alias, label: r.label, hex: r.swatchHex };
+          }
+          return { kind: "image", alias: r.alias, url: r.imageUrl };
+        }),
       ];
 
       // Regions are NOT provider image references — they are mask regions on the
@@ -517,21 +522,32 @@ export function G2Node({ id, data, parentId, selected }: NodeProps<G2CanvasNode>
                     hoveredAliasId === ref.nodeId && "ring-2 ring-yellow-400",
                   )}
                 >
-                  <ImagePreviewDialog
-                    src={ref.imageUrl}
-                    alt={`@${ref.alias} reference`}
-                    title={`@${ref.alias} reference image`}
-                    trigger={
-                      <button
-                        type="button"
-                        className="nodrag nopan size-full cursor-zoom-in outline-none"
-                        aria-label={`Enlarge @${ref.alias} reference image`}
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={ref.imageUrl} alt="" className="size-full object-cover" />
-                      </button>
-                    }
-                  />
+                  {ref.kind === "image" ? (
+                    <ImagePreviewDialog
+                      src={ref.imageUrl}
+                      alt={`@${ref.alias} reference`}
+                      title={`@${ref.alias} reference image`}
+                      trigger={
+                        <button
+                          type="button"
+                          className="nodrag nopan size-full cursor-zoom-in outline-none"
+                          aria-label={`Enlarge @${ref.alias} reference image`}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={ref.imageUrl} alt="" className="size-full object-cover" />
+                        </button>
+                      }
+                    />
+                  ) : (
+                    // Pantone swatch — no image URL; show a solid color chip
+                    // with its hex label so the swatch is still inspectable.
+                    <div
+                      className="nodrag nopan size-full"
+                      style={{ backgroundColor: ref.swatchHex }}
+                      title={`@${ref.alias} Pantone ${ref.label} (${ref.swatchHex})`}
+                      aria-label={`@${ref.alias} Pantone ${ref.label}`}
+                    />
+                  )}
                   <span className="nodrag nopan absolute bottom-0 left-0 right-0 truncate bg-black/55 px-0.5 text-[0.55rem] leading-3 text-white">
                     @{ref.alias}
                   </span>

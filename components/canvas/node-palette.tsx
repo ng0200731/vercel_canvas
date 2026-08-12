@@ -5,6 +5,7 @@ import {
   Download,
   Package,
   PackageOpen,
+  Paintbrush,
   Palette,
   Sparkles,
   Square,
@@ -35,6 +36,7 @@ const ICONS: Record<NodeType, LucideIcon> = {
   action: Zap,
   pantone: Palette,
   g2: Wand2,
+  painted: Paintbrush,
 };
 
 function nodeDisplayName(node: CanvasNode): string {

@@ -64,6 +64,7 @@ export const NODE_TYPES = [
   "action",
   "pantone",
   "g2",
+  "painted",
 ] as const;
 
 export type NodeType = (typeof NODE_TYPES)[number];
@@ -273,6 +274,28 @@ export interface G2NodeData {
   [key: string]: unknown;
 }
 
+export interface PaintedNodeData {
+  /**
+   * The resolved main image URL to render (either an override or a promoted
+   * wired source). Written by the component's resolution effect.
+   */
+  mainImageUrl: string | null;
+  mainImageStoragePath: string | null;
+  /**
+   * True while the last main image came from a paste/drop on the node body
+   * (not a wired source). While true, the wired value is shadowed — the
+   * resolution effect does not overwrite it. Clearing the override (set to
+   * false) lets a wired source re-promote to `mainImageUrl`.
+   */
+  mainImageOverride: boolean;
+  /** Optional alias badge shown on the thumbnail (e.g. "@shoe"). */
+  alias?: string | null;
+  /** Node size in pixels; set by the resize handle. Absent = type default. */
+  width?: number;
+  height?: number;
+  [key: string]: unknown;
+}
+
 // ── Generic shapes used by the persistence layer ─────────────────────────
 export type CanvasNode = Node<Record<string, unknown>, NodeType>;
 export type CanvasEdge = Edge;
@@ -296,3 +319,4 @@ export type ProductCanvasNode = Node<ProductNodeData, "product">;
 export type ActionCanvasNode = Node<ActionNodeData, "action">;
 export type PantoneCanvasNode = Node<PantoneNodeData, "pantone">;
 export type G2CanvasNode = Node<G2NodeData, "g2">;
+export type PaintedCanvasNode = Node<PaintedNodeData, "painted">;

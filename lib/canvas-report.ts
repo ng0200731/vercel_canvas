@@ -339,7 +339,8 @@ function findOutputForSource(
       node.type === "pantone" ||
       node.type === "suppler" ||
       node.type === "product" ||
-      node.type === "imageInput"
+      node.type === "imageInput" ||
+      node.type === "painted"
     ) {
       queue.push(...connectedNodeIds(edges, nodeId).filter((id) => !seen.has(id)));
     }
@@ -841,6 +842,24 @@ export function buildCanvasReport(input: BuildCanvasReportInput): CanvasReport {
       };
     });
 
+  // Painted nodes carry a single resolved main image (paste/drop override or a
+  // promoted wired source) — surface them as an image-bearing block, like the
+  // generic/imageInput blocks above.
+  const paintedBlocks = nodes
+    .filter((node) => node.type === "painted")
+    .map((node) => {
+      const data = asRecord(node.data);
+      const alias = stringValue(data.alias);
+      const imageUrl = nullableString(data.mainImageUrl);
+      return {
+        id: `painted-${node.id}`,
+        title: "Painted image",
+        subtitle: alias ? `@${alias}` : undefined,
+        details: [{ label: "Alias", value: alias }].filter((item) => item.value),
+        image: imageUrl ? { url: imageUrl, alt: imageAlt(alias, "Painted image") } : null,
+      };
+    });
+
   const outputBlocks = nodes.filter((node) => node.type === "imageOutput").map(outputBlockForNode);
   const reportImage = selectedRenderImage(
     input.images,
@@ -867,6 +886,7 @@ export function buildCanvasReport(input: BuildCanvasReportInput): CanvasReport {
     { id: "supplier-details", title: "Supplier details", blocks: supplierBlocks },
     { id: "pantone", title: "Pantone", blocks: pantoneBlocks },
     { id: "generic-node", title: "Generic node", blocks: genericBlocks },
+    { id: "painted", title: "Painted images", blocks: paintedBlocks },
     {
       id: "output-prompt",
       title: "Output and input prompt",

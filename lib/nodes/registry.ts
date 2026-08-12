@@ -191,6 +191,18 @@ export const NODE_META: Record<NodeType, NodeMeta> = {
       resultUrl: null,
     }),
   },
+  painted: {
+    type: "painted",
+    label: "Painted",
+    description: "Paste, drop, or wire in a main image",
+    palette: true,
+    defaultData: () => ({
+      mainImageUrl: null,
+      mainImageStoragePath: null,
+      mainImageOverride: false,
+      alias: null,
+    }),
+  },
 };
 
 /** Node types surfaced in the palette (excludes `generate` until M7). */

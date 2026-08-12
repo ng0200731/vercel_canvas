@@ -44,14 +44,16 @@ export interface ConnectedOutputState {
 }
 
 /**
- * A single image-bearing source wired into a G2 node, split by the role the
- * drop recorded on the edge. `main` is image A; `reference` is B/C/D… Reuses
- * the ConnectedInputReference shape (alias/label/masks) verbatim — the G2
- * editor just needs to know which one is the main image vs. a reference.
+ * A single image- or color-bearing source wired into a G2 node, split by the
+ * role the drop recorded on the edge. `main` is the image (A) — the mask
+ * carrier; `reference` holds B/C/D… and may be either an image reference or a
+ * Pantone swatch. Reuses the ConnectedInputReference union so Pantone sources
+ * (color-only, no pixels) flow through the same plumbing as image sources —
+ * the G2 editor just needs to know which one is the main image vs. a reference.
  */
 export interface G2ImageReferences {
   main: ConnectedImageReference | null;
-  references: ConnectedImageReference[];
+  references: ConnectedInputReference[];
 }
 
 export interface CanvasActions {
