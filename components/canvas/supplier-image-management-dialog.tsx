@@ -42,6 +42,7 @@ import {
 import {
   MAX_SUPPLIER_MATCH_CATALOG_IMAGES,
   SUPPLIER_MATCH_ELAND_MODEL,
+  SUPPLIER_MATCH_GEMINI_MODEL,
   SUPPLIER_MATCH_LOCAL_MODEL,
   SUPPLIER_MATCH_LABELSTASH_MODEL,
   SUPPLIER_MATCH_MILVUS_MODEL,
@@ -183,6 +184,9 @@ function matchEngineLabel(model: string): string {
   }
   if (model === SUPPLIER_MATCH_ELAND_MODEL) {
     return "the-eland.co Partner Search API";
+  }
+  if (model === SUPPLIER_MATCH_GEMINI_MODEL) {
+    return "Gemini embedding-2 (cosine)";
   }
   return model;
 }
@@ -793,7 +797,9 @@ export function SupplierImageManagementDialog({
                       ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
                       : engine === "eland"
                         ? "border-violet-500/30 bg-violet-500/10 text-violet-800 dark:text-violet-200"
-                        : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200"
+                        : engine === "gemini"
+                          ? "border-rose-500/30 bg-rose-500/10 text-rose-800 dark:text-rose-200"
+                          : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200"
               }
               variant="outline"
             >
@@ -806,7 +812,9 @@ export function SupplierImageManagementDialog({
                     ? "LabelStash-style search"
                     : engine === "eland"
                       ? "the-eland.co portal search"
-                      : "Image search"}
+                      : engine === "gemini"
+                        ? "Gemini image search"
+                        : "Image search"}
             </Badge>
             {catalog.length ? (
               <span className="text-muted-foreground text-xs">
@@ -824,7 +832,9 @@ export function SupplierImageManagementDialog({
                   ? "Search this supplier by reference image"
                   : engine === "eland"
                     ? "Search the-eland.co by reference image"
-                    : "Search similar supplier images"}
+                    : engine === "gemini"
+                      ? "Search similar supplier images with Gemini"
+                      : "Search similar supplier images"}
           </DialogTitle>
           <DialogDescription>
             {engine === "milvus"
@@ -835,7 +845,9 @@ export function SupplierImageManagementDialog({
                   ? "Upload a reference image. It is compared against the selected supplier's local product images and ranked highest-to-lowest similarity. No image leaves your machine — this runs locally."
                   : engine === "eland"
                     ? "Upload a reference image. It is sent to the-eland.co with your portal API key and matched against images your organization previously uploaded at /portal/upload (then indexed). Add a text query to narrow by name, description or tags. Empty results mean nothing is indexed yet — that is normal after a fresh upload."
-                    : "Upload a reference image. Search only the selected supplier's product images and rank matches from highest to lowest similarity."}
+                    : engine === "gemini"
+                      ? "Upload a reference image. Google Gemini's multi-modal embedding model (gemini-embedding-2, 768-dim) embeds your reference and this supplier's catalog images server-side, then ranks by cosine similarity. Your reference image is sent to Google's API with your GEMINI_API_KEY; catalog images stay scoped to the selected supplier."
+                      : "Upload a reference image. Search only the selected supplier's product images and rank matches from highest to lowest similarity."}
           </DialogDescription>
         </DialogHeader>
 
@@ -986,7 +998,9 @@ export function SupplierImageManagementDialog({
                       ? "Search is limited to the selected supplier's local product images. Matches run entirely on this server using local visual embeddings — no external service is called, nothing is uploaded. The score is a relative ranking signal, shown as % for layout parity."
                       : engine === "eland"
                         ? "Your reference image and optional query are sent to the-eland.co with your portal API key. Results come from images your organization previously uploaded at /portal/upload (and indexed) — the API has no per-supplier filter, so narrow with the query box (matches name/description/tags). Scores are a relative ranking signal, not a percentage."
-                        : "Search is limited to the selected supplier's images. When the CLIP sidecar is running, matches use multi-view visual embeddings plus local feature matching for crop-from-product cases; otherwise the local histogram fallback is used. No external LLM analysis."}
+                        : engine === "gemini"
+                          ? "Your reference image and this supplier's catalog images are sent to Google's Gemini embedding API (gemini-embedding-2) with your server-side GEMINI_API_KEY, embedded to 768-dim vectors, and cosine-ranked in process. No external catalog — only the selected supplier's images leave your server."
+                          : "Search is limited to the selected supplier's images. When the CLIP sidecar is running, matches use multi-view visual embeddings plus local feature matching for crop-from-product cases; otherwise the local histogram fallback is used. No external LLM analysis."}
               </p>
             </div>
           </aside>

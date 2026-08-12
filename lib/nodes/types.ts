@@ -290,6 +290,26 @@ export interface PaintedNodeData {
   mainImageOverride: boolean;
   /** Optional alias badge shown on the thumbnail (e.g. "@shoe"). */
   alias?: string | null;
+  /**
+   * Regions drawn on the main image in its NATURAL pixel space, reusing the
+   * G2 region shape. The Painted node drives its OWN region editor and mask —
+   * these are NOT G2 node regions; the name keeps them self-documenting.
+   */
+  paintedRegions?: G2Region[];
+  paintedUndoStack?: G2Region[][];
+  paintedRedoStack?: G2Region[][];
+  /** Plain-text edit prompt (NO @alias mention system, unlike G2). */
+  prompt?: string;
+  /** Generation options (mirror G2's option set). */
+  model?: ImageGenerationModelId;
+  size?: ImageGenerationSize;
+  outputFormat?: ImageGenerationOutputFormat;
+  resolution?: ImageGenerationResolution;
+  matchSourceSize?: boolean;
+  /** Run status, kept in sync with the connected Output node. */
+  status?: "idle" | "loading" | "error" | "done";
+  resultUrl?: string | null;
+  error?: string;
   /** Node size in pixels; set by the resize handle. Absent = type default. */
   width?: number;
   height?: number;

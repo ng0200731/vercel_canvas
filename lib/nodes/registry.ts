@@ -201,6 +201,20 @@ export const NODE_META: Record<NodeType, NodeMeta> = {
       mainImageStoragePath: null,
       mainImageOverride: false,
       alias: null,
+      paintedRegions: [],
+      paintedUndoStack: [],
+      paintedRedoStack: [],
+      prompt: "",
+      // Edit-image defaults (mirror the G2 node): PNG preview at 1024x1024 so
+      // the edited result round-trips cleanly through /api/generate and lands
+      // next to the original in the Output node.
+      model: DEFAULT_IMAGE_GENERATION_MODEL,
+      size: "1024x1024" as const,
+      outputFormat: "png" as const,
+      resolution: "preview" as const,
+      matchSourceSize: true,
+      status: "idle",
+      resultUrl: null,
     }),
   },
 };

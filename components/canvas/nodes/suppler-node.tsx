@@ -172,7 +172,7 @@ export function SupplerNode({ id, data, parentId, selected }: NodeProps<SupplerC
         data-new-node-focus-field
         value={alias}
         onChange={(event) => updateNodeData(id, { alias: event.target.value })}
-        placeholder="alias"
+        placeholder="alias (e.g. @supplier)"
         aria-label="Supplier image alias"
         className="nodrag h-8 text-xs"
       />
@@ -447,6 +447,38 @@ export function SupplerNode({ id, data, parentId, selected }: NodeProps<SupplerC
                 </Button>
               }
             />
+            <SupplierImageManagementDialog
+              products={selectedSupplierCatalogProducts}
+              suppliers={selectedSupplier ? [selectedSupplier] : []}
+              isCatalogLoading={suppliers.isLoading || products.isLoading}
+              catalogError={
+                !data.supplierId
+                  ? "Select a supplier before searching its product images."
+                  : suppliers.error instanceof Error
+                    ? suppliers.error.message
+                    : products.error instanceof Error
+                      ? products.error.message
+                      : null
+              }
+              currentSupplierId={data.supplierId}
+              selectedItemId={selectedGalleryItemId}
+              engine="gemini"
+              onSelect={selectProductImage}
+              trigger={
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="outline"
+                  aria-label="Search similar supplier product images with Gemini"
+                  title="Search similar supplier product images with Gemini"
+                  className="nodrag"
+                >
+                  <span aria-hidden className="text-xs font-bold leading-none">
+                    G
+                  </span>
+                </Button>
+              }
+            />
             {data.supplierId ? (
               <ProductImageBrowserDialog
                 products={selectedSupplierProducts}
@@ -515,6 +547,9 @@ export function SupplerNode({ id, data, parentId, selected }: NodeProps<SupplerC
             <div className="flex items-center justify-between gap-2 p-2">
               <span className="min-w-0 truncate text-xs font-medium">
                 {data.productSubject ?? data.variantImageName ?? "Selected image"}
+              </span>
+              <span className="nodrag nopan shrink-0 truncate rounded bg-black/55 px-1 text-[0.6rem] text-white">
+                @{alias}
               </span>
               <Button
                 type="button"

@@ -102,6 +102,22 @@ const envSchema = z
       z.number().int().min(1).max(10),
     ),
 
+    // ── Google Gemini image-embedding search (optional, server-only) ──
+    // Authenticates with the X-goog-api-key header against
+    // POST /v1beta/models/<model>:embedContent. Embeds the reference image and
+    // each selected-supplier catalog image with gemini-embedding-2, then cosine
+    // ranks them in-process — no Python sidecar, no external catalog. Catalog
+    // images stay scoped to the selected supplier (the request only carries
+    // the current supplier's images).
+    GEMINI_API_KEY: optionalString,
+    GEMINI_EMBEDDING_MODEL: optionalString.default("gemini-embedding-2"),
+    GEMINI_EMBEDDING_DIM: optionalIntDefault(768).pipe(z.number().int().min(1).max(3072)),
+    GEMINI_EMBEDDING_TIMEOUT_MS: optionalIntDefault(60_000).pipe(
+      z.number().int().min(1_000).max(300_000),
+    ),
+    GEMINI_MATCH_TOP_K: optionalIntDefault(12).pipe(z.number().int().min(1).max(100)),
+    GEMINI_MATCH_FALLBACK_TO_LOCAL: optionalBoolean.default(false),
+
     // SMTP (optional, server-only). An optional local catcher overrides 163.com, then Gmail.
     SMTP_LOCAL_HOST: optionalString,
     SMTP_LOCAL_PORT: optionalPort,
@@ -174,6 +190,12 @@ function loadEnv(): Env {
     ELAND_PORTAL_BASE_URL: process.env.ELAND_PORTAL_BASE_URL,
     ELAND_PORTAL_TIMEOUT_MS: process.env.ELAND_PORTAL_TIMEOUT_MS,
     ELAND_PORTAL_TOP_K: process.env.ELAND_PORTAL_TOP_K,
+    GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+    GEMINI_EMBEDDING_MODEL: process.env.GEMINI_EMBEDDING_MODEL,
+    GEMINI_EMBEDDING_DIM: process.env.GEMINI_EMBEDDING_DIM,
+    GEMINI_EMBEDDING_TIMEOUT_MS: process.env.GEMINI_EMBEDDING_TIMEOUT_MS,
+    GEMINI_MATCH_TOP_K: process.env.GEMINI_MATCH_TOP_K,
+    GEMINI_MATCH_FALLBACK_TO_LOCAL: process.env.GEMINI_MATCH_FALLBACK_TO_LOCAL,
     SMTP_163_USERNAME: process.env.SMTP_163_USERNAME,
     SMTP_163_PASSWORD: process.env.SMTP_163_PASSWORD,
     SMTP_LOCAL_HOST: process.env.SMTP_LOCAL_HOST,
@@ -227,6 +249,9 @@ export const isMilvusMatchConfigured = Boolean(env.MILVUS_MATCH_URL);
 
 /** True when the the-eland.co LabelStash Partner Search API key is present. */
 export const isElandConfigured = Boolean(env.ELAND_PORTAL_API_KEY);
+
+/** True when a Google Gemini API key is present (multi-modal image embedding search active). */
+export const isGeminiConfigured = Boolean(env.GEMINI_API_KEY);
 
 /**
  * Server-only: returns DATABASE_URL when local Postgres mode is active.

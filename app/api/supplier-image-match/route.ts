@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { supplierImageMatchRequestSchema } from "@/lib/supplier-image-match";
 import { matchSupplierImagesWithEland } from "@/lib/supplier-image-eland";
+import { matchSupplierImagesWithGemini } from "@/lib/supplier-image-gemini";
 import { matchSupplierImagesWithMilvus } from "@/lib/supplier-image-milvus";
 import { matchSupplierImagesWithPictureSherlock } from "@/lib/supplier-image-picture-sherlock";
 import { matchSupplierImages, type SupplierImageMatcher } from "@/lib/supplier-image-vector-match";
@@ -14,6 +15,7 @@ interface SupplierImageMatchRouteDependencies {
   matchMilvus: SupplierImageMatcher;
   matchLocal: SupplierImageMatcher;
   matchEland: SupplierImageMatcher;
+  matchGemini: SupplierImageMatcher;
 }
 
 export function createSupplierImageMatchPostHandler({
@@ -21,6 +23,7 @@ export function createSupplierImageMatchPostHandler({
   matchMilvus,
   matchLocal,
   matchEland,
+  matchGemini,
 }: SupplierImageMatchRouteDependencies) {
   return async function POST(request: Request) {
     let payload: unknown;
@@ -44,7 +47,9 @@ export function createSupplierImageMatchPostHandler({
           ? matchLocal
           : parsed.data.engine === "eland"
             ? matchEland
-            : matchPictureSherlock;
+            : parsed.data.engine === "gemini"
+              ? matchGemini
+              : matchPictureSherlock;
 
     try {
       return NextResponse.json(await match(parsed.data, request.signal));
@@ -61,4 +66,5 @@ export const POST = createSupplierImageMatchPostHandler({
   matchMilvus: matchSupplierImagesWithMilvus,
   matchLocal: matchSupplierImages,
   matchEland: matchSupplierImagesWithEland,
+  matchGemini: matchSupplierImagesWithGemini,
 });

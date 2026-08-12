@@ -1,27 +1,70 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ClipboardEvent as ReactClipboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ClipboardEvent as ReactClipboardEvent,
+} from "react";
 import { type NodeProps } from "@xyflow/react";
-import { ImageIcon, Link2, Loader2, Upload, X } from "lucide-react";
+import { ImageIcon, Link2, Loader2, Square, Upload, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ImagePreviewDialog } from "@/components/image-preview-dialog";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import {
+  IMAGE_GENERATION_OUTPUT_FORMATS,
+  IMAGE_GENERATION_RESOLUTIONS,
+  IMAGE_GENERATION_SIZES,
+  type ImageGenerationModelId,
+  type ImageGenerationOutputFormat,
+  type ImageGenerationReference,
+  type ImageGenerationResolution,
+  type ImageGenerationSize,
+  imageGenerationErrorSchema,
+  imageGenerationResponseSchema,
+  normalizeImageGenerationModel,
+  normalizeImageGenerationOutputFormat,
+  normalizeImageGenerationResolution,
+  normalizeImageGenerationSize,
+} from "@/lib/image-generation-models";
 import { NODE_PORT_COLORS } from "@/lib/nodes/ports";
-import type { PaintedCanvasNode } from "@/lib/nodes/types";
+import { createMaskFromG2Regions } from "@/lib/nodes/g2";
+import { G2MentionTextarea, type MentionCandidate } from "@/lib/prompt-mention-g2";
+import type { G2Region, PaintedCanvasNode } from "@/lib/nodes/types";
 import {
   isImageRefDrag,
   readImageRefDrag,
   writeImageRefDrag,
 } from "@/lib/nodes/image-ref-drag";
-import { uploadImage } from "@/lib/upload";
-import { useCanvasActions, useConnectionHighlight, useGroupAccent } from "../canvas-context";
+import { G2DrawOverlay } from "./g2-draw-overlay";
+import { isAbortError } from "@/lib/generation-run";
+import {
+  useCanvasActions,
+  useConnectionHighlight,
+  useGroupAccent,
+} from "../canvas-context";
+import { persistGeneratedImage, uploadImage } from "@/lib/upload";
 import { NodeDeleteButton } from "./delete-button";
 import { InputPort, OutputPort } from "./port";
 import { ResizeHandle } from "./resize-handle";
 
 const DEFAULT_WIDTH = 256;
-const DEFAULT_HEIGHT = 220;
+// Taller now that the body also hosts a prompt + generation options + Edit Region button.
+const DEFAULT_HEIGHT = 440;
 
 function firstImageFile(items: DataTransferItemList): File | null {
   for (const item of Array.from(items)) {
@@ -52,13 +95,82 @@ export function resolvePaintedMainImage(input: {
   return input.wired;
 }
 
+// ── Generation option label maps ─────────────────────────────────────────
+// Duplicated from g2-node.tsx — they are plain literal maps not exported by
+// lib/image-generation-models, and the user asked to NOT extract a shared
+// module (avoid touching G2). Kept in sync with G2 by copy.
+const PAINTED_GPT_MODEL_OPTIONS: readonly {
+  label: string;
+  description: string;
+  model: ImageGenerationModelId;
+  status: "current" | "legacy";
+  enabled: boolean;
+  disabledReason?: string;
+}[] = [
+  { label: "2", description: "GPT Image 2", model: "gpt-image-2", status: "current", enabled: true },
+  { label: "1.5 Pro", description: "GPT Image 1.5", model: "gpt-image-1.5", status: "current", enabled: true },
+  { label: "1", description: "GPT Image 1", model: "gpt-image-1", status: "current", enabled: true },
+  {
+    label: "1 Mini",
+    description: "GPT Image 1 Mini",
+    model: "gpt-image-1-mini",
+    status: "current",
+    enabled: false,
+    disabledReason: "Unavailable on Xiangsu currently",
+  },
+  { label: "DALL-E 3", description: "Legacy generation", model: "dall-e-3", status: "legacy", enabled: true },
+  { label: "DALL-E 2", description: "Legacy generation", model: "dall-e-2", status: "legacy", enabled: true },
+];
+
+const SIZE_LABELS: Record<ImageGenerationSize, string> = {
+  "1024x1024": "Square · 1:1",
+  "1536x1024": "Wide · 3:2",
+  "1024x1536": "Tall · 2:3",
+  "1792x1024": "16:9",
+  "1024x1792": "9:16",
+  "1280x960": "4:3",
+  "960x1280": "3:4",
+  "1792x768": "21:9",
+  "768x1792": "9:21",
+};
+
+const FORMAT_LABELS: Record<ImageGenerationOutputFormat, string> = {
+  png: "PNG",
+  jpeg: "JPEG",
+  webp: "WebP",
+};
+
+const RESOLUTION_LABELS: Record<ImageGenerationResolution, string> = {
+  preview: "Preview",
+  "2K": "2K",
+  "4K": "4K",
+};
+
 export function PaintedNode({ id, data, parentId, selected }: NodeProps<PaintedCanvasNode>) {
-  const { updateNodeData, getG2ImageReferences, addG2ImageReference, deleteEdge } =
-    useCanvasActions();
+  const {
+    updateNodeData,
+    getG2ImageReferences,
+    addG2ImageReference,
+    deleteEdge,
+    hasConnectedOutputNode,
+    getConnectedOutputState,
+    updateConnectedOutputData,
+    startGenerationRun,
+    isGenerationRunCurrent,
+    finishGenerationRun,
+    cancelGenerationRun,
+    writeGeneratedImageToOutput,
+  } = useCanvasActions();
   const highlight = useConnectionHighlight(id);
   const accent = useGroupAccent(parentId);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [overlayOpen, setOverlayOpen] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  // Local abort fallback. The canvas-level cancelGenerationRun guard has not
+  // historically recognized the `painted` type; this controller guarantees
+  // the node's own Stop button can cancel the in-flight request regardless.
+  const localAbortRef = useRef<AbortController | null>(null);
   const width = data.width ?? DEFAULT_WIDTH;
   const height = data.height ?? DEFAULT_HEIGHT;
 
@@ -67,6 +179,9 @@ export function PaintedNode({ id, data, parentId, selected }: NodeProps<PaintedC
   const { main: wiredMainRef } = getG2ImageReferences(id);
   const wired = wiredMainRef?.imageUrl ?? null;
   const wiredEdgeId = wiredMainRef?.edgeId ?? null;
+  const wiredNodeId = wiredMainRef?.nodeId ?? null;
+  const wiredAlias = wiredMainRef?.alias ?? null;
+  const wiredLabel = wiredMainRef?.label ?? null;
 
   const override = Boolean(data.mainImageOverride);
   const overrideUrl = typeof data.mainImageUrl === "string" ? data.mainImageUrl : null;
@@ -74,6 +189,51 @@ export function PaintedNode({ id, data, parentId, selected }: NodeProps<PaintedC
   // Drive renders from the resolved URL. The stored `mainImageUrl` is kept in
   // sync with the wire by the effect below when no override is active.
   const mainImageUrl = resolvePaintedMainImage({ override, overrideUrl, wired });
+
+  // ── Region state (defensive: legacy painted nodes have no paintedRegions) ──
+  const paintedRegions = useMemo<G2Region[]>(
+    () => (Array.isArray(data.paintedRegions) ? (data.paintedRegions as G2Region[]) : []),
+    [data.paintedRegions],
+  );
+  const paintedUndoStack = useMemo<G2Region[][]>(
+    () => (Array.isArray(data.paintedUndoStack) ? (data.paintedUndoStack as G2Region[][]) : []),
+    [data.paintedUndoStack],
+  );
+  const paintedRedoStack = useMemo<G2Region[][]>(
+    () => (Array.isArray(data.paintedRedoStack) ? (data.paintedRedoStack as G2Region[][]) : []),
+    [data.paintedRedoStack],
+  );
+
+  const prompt = typeof data.prompt === "string" ? data.prompt : "";
+
+  // ── @alias mention candidates ───────────────────────────────────────────────
+  // The wired supplier (or other) source becomes a mentionable @alias so the
+  // user can reference it in the prompt. Same candidate shape as G2's dropdown.
+  const mentionCandidates: MentionCandidate[] = useMemo(() => {
+    const candidates: MentionCandidate[] = [];
+    if (wired) {
+      candidates.push({
+        id: wiredNodeId ?? "wired",
+        alias: wiredAlias ?? "main",
+        label: wiredLabel ?? "Wired image",
+        group: "Wired",
+      });
+    }
+    return candidates;
+  }, [wired, wiredNodeId, wiredAlias, wiredLabel]);
+
+  // ── Generation options ───────────────────────────────────────────────────
+  const model = normalizeImageGenerationModel(data.model ?? "gpt-image-2");
+  const size = normalizeImageGenerationSize(data.size ?? "1024x1024");
+  const outputFormat = normalizeImageGenerationOutputFormat(data.outputFormat ?? "png");
+  const resolution = normalizeImageGenerationResolution(data.resolution ?? "preview");
+  const matchSourceSize = data.matchSourceSize !== false; // default on
+  const isGptModel = model.startsWith("gpt-image") || model.startsWith("dall-e");
+
+  // ── Connected Output state ───────────────────────────────────────────────
+  const hasOutput = hasConnectedOutputNode(id);
+  const connectedOutput = getConnectedOutputState(id);
+  const connectedOutputHasImage = Boolean(connectedOutput?.resultUrl);
 
   const handleFile = useCallback(
     async (file: File | undefined | null) => {
@@ -147,6 +307,10 @@ export function PaintedNode({ id, data, parentId, selected }: NodeProps<PaintedC
       mainImageUrl: wired,
       mainImageStoragePath: null,
       mainImageOverride: false,
+      // A pasted-override image is gone; its regions no longer apply.
+      paintedRegions: [],
+      paintedUndoStack: [],
+      paintedRedoStack: [],
     });
   }
 
@@ -154,8 +318,220 @@ export function PaintedNode({ id, data, parentId, selected }: NodeProps<PaintedC
     if (wiredEdgeId) deleteEdge(wiredEdgeId);
   }
 
+  // ── Region overlay commit ────────────────────────────────────────────────
+  function commitRegions(
+    nextRegions: G2Region[],
+    nextUndo: G2Region[][],
+    nextRedo: G2Region[][],
+  ) {
+    updateNodeData(id, {
+      paintedRegions: nextRegions,
+      paintedUndoStack: nextUndo,
+      paintedRedoStack: nextRedo,
+    });
+  }
+
+  // ── Regional edit (mask + /api/generate) ──────────────────────────────────
+  // Mirrors g2-node.tsx `onGenerate` but simplified: a single reference (the
+  // main image with its mask), a plain prompt (no @alias rewriting, no system
+  // prompt), result written to the connected Output node.
+  const onEditRegion = useCallback(async () => {
+    if (!mainImageUrl) {
+      toast.error("Add a main image first");
+      return;
+    }
+    if (!prompt.trim()) {
+      toast.error("Enter a prompt");
+      return;
+    }
+    if (paintedRegions.length === 0) {
+      toast.error("Draw a region on the image");
+      return;
+    }
+
+    const run = startGenerationRun(id);
+    if (!run) return; // an edit is already running for this node
+
+    const outputReady = updateConnectedOutputData(id, { status: "loading", error: undefined });
+    if (!outputReady) {
+      finishGenerationRun(id, run.runId);
+      toast.error("Connect an Output node before editing");
+      return;
+    }
+
+    setIsGenerating(true);
+    updateNodeData(id, { status: "loading", error: undefined });
+    localAbortRef.current = new AbortController();
+
+    try {
+      // Read the main image's natural dims (mask sizing + matchSourceSize).
+      const mainBlobRes = await fetch(mainImageUrl);
+      const mainBlob = await mainBlobRes.blob();
+      const mainBitmap = await createImageBitmap(mainBlob);
+      const naturalWidth = mainBitmap.width;
+      const naturalHeight = mainBitmap.height;
+
+      // ── Single-region edit ──────────────────────────────────────────────────
+      // We MUST edit only the FIRST region this node holds. Editing all regions
+      // at once fails: the mask is a union of every hole, the model's location
+      // cue is the union bbox, and with two instructions in the prompt the
+      // model applies the FIRST instruction to whatever it sees first — so
+      // "change region-1 color to blue / change region-2 color to yellow"
+      // paints BOTH holes blue (region-2's instruction wins) and region-1
+      // visibly "does not change" (it got the wrong colour or no displacement).
+      // Fix: one Painted node == one region. We mask only region[0] and build
+      // the prompt from that region's name regardless of other strokes.
+      // Base alias is the wired source's @alias when present (so the prompt's
+      // @supplier mention resolves to the wired supplier image), else fall back
+      // to the node's own alias, else "main".
+      const baseAlias =
+        wiredAlias ?? (typeof data.alias === "string" && data.alias ? data.alias : "main");
+      const mentionToken = `@${baseAlias}`;
+      const activeRegion = paintedRegions[0]!;
+      const activeRegionName = (activeRegion.name?.trim() || "region-1").replace(/\s+/g, "-");
+      // If the user's prompt already mentions the region (e.g. "change region-1
+      // color to blue") use it verbatim; otherwise wrap their text as the
+      // instruction for the active region. Always anchor with @main so server-
+      // side colour/object constraints fire (they need a base-image mention).
+      let resolvedPrompt: string;
+      if (prompt.includes(activeRegionName)) {
+        resolvedPrompt = prompt.includes(mentionToken)
+          ? prompt
+          : `${mentionToken}: ${prompt}`;
+      } else {
+        resolvedPrompt = `${mentionToken}: ${prompt.replace(/^\s*@?\w+:\s*/, "")} (apply to ${activeRegionName})`;
+      }
+
+      // Mask ONLY the first region — separate it from any others the user may
+      // have drawn so this node edits exactly one hole and the location cue /
+      // bbox the server computes are that region alone, not a union.
+      const maskBlob = await createMaskFromG2Regions(
+        naturalWidth,
+        naturalHeight,
+        [activeRegion],
+      );
+      mainBitmap.close();
+      if (!maskBlob) throw new Error("Failed to create mask from regions");
+
+      // Upload the mask.
+      const maskForm = new FormData();
+      maskForm.append("file", maskBlob, "painted-mask.png");
+      maskForm.append("name", `painted-mask-${id}`);
+      const maskRes = await fetch("/api/masks", { method: "POST", body: maskForm });
+      if (!maskRes.ok) throw new Error("Failed to upload mask");
+      const maskJson = (await maskRes.json()) as { url?: unknown };
+      const maskUrl = typeof maskJson.url === "string" ? maskJson.url : null;
+      if (!maskUrl) throw new Error("Failed to get mask URL");
+
+      // Single reference: the main image carries the mask. alias matches the
+      // wired source's @alias (or the node's own alias) injected above so the
+      // server-side constraint that needs a base-image mention fires correctly.
+      const referenceList: ImageGenerationReference[] = [
+        {
+          kind: "image",
+          alias: baseAlias,
+          url: mainImageUrl,
+          maskUrl,
+        },
+      ];
+
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: run.signal,
+        body: JSON.stringify({
+          model,
+          prompt: resolvedPrompt,
+          size,
+          outputFormat: isGptModel ? "png" : outputFormat,
+          resolution,
+          references: referenceList,
+          matchSourceSize,
+        }),
+      });
+
+      if (!isGenerationRunCurrent(id, run.runId)) return;
+      const json: unknown = await res.json();
+      if (!isGenerationRunCurrent(id, run.runId)) return;
+
+      const parsed = imageGenerationResponseSchema.safeParse(json);
+      if (!res.ok || !parsed.success) {
+        const error = imageGenerationErrorSchema.safeParse(json);
+        throw new Error(error.success ? error.data.error : "Edit failed");
+      }
+
+      const finalFormat = isGptModel ? "png" : outputFormat;
+      const persisted = await persistGeneratedImage(parsed.data.url, finalFormat, run.signal);
+      if (!isGenerationRunCurrent(id, run.runId)) return;
+
+      updateNodeData(id, { status: "done", resultUrl: persisted.url, error: undefined });
+
+      const outputWritten = writeGeneratedImageToOutput(id, persisted.url, {
+        prompt,
+        model,
+        size,
+        resolution,
+        outputFormat: finalFormat,
+        storagePath: persisted.storagePath,
+      });
+      if (!outputWritten) {
+        throw new Error("Output node was disconnected before the edit finished");
+      }
+      toast.success("Region edited and saved to Renders.");
+    } catch (err) {
+      const cancelled =
+        run.signal.aborted ||
+        !isGenerationRunCurrent(id, run.runId) ||
+        isAbortError(err) ||
+        Boolean(localAbortRef.current?.signal.aborted);
+      if (cancelled) return;
+      const message = err instanceof Error ? err.message : "Edit failed";
+      updateNodeData(id, { status: "error", error: message });
+      updateConnectedOutputData(id, { status: "error", error: message });
+      toast.error(message);
+    } finally {
+      setIsGenerating(false);
+      localAbortRef.current = null;
+      finishGenerationRun(id, run.runId);
+    }
+  }, [
+    id,
+    mainImageUrl,
+    prompt,
+    paintedRegions,
+    startGenerationRun,
+    updateConnectedOutputData,
+    finishGenerationRun,
+    updateNodeData,
+    model,
+    size,
+    outputFormat,
+    isGptModel,
+    resolution,
+    matchSourceSize,
+    isGenerationRunCurrent,
+    writeGeneratedImageToOutput,
+    data.alias,
+    wiredAlias,
+  ]);
+
+  function stopGeneration() {
+    // Fire the local controller first — guaranteed to cancel the in-flight
+    // request regardless of the canvas-level cancel guard's node-type filter.
+    localAbortRef.current?.abort(new DOMException("Edit cancelled", "AbortError"));
+    // Then ask the canvas manager to abort the run + reset node state. It may
+    // bail on the type guard (canvas-editor.tsx); the local abort + the
+    // isGenerationRunCurrent checks inside onEditRegion still short-circuit.
+    if (cancelGenerationRun(id)) {
+      toast.info("Edit stopped.");
+    }
+    updateNodeData(id, { status: "idle", error: undefined });
+    setIsGenerating(false);
+  }
+
   const isWired = wired !== null;
   const showClearButton = mainImageUrl !== null;
+  const regionCount = paintedRegions.length;
 
   return (
     <div
@@ -176,9 +552,22 @@ export function PaintedNode({ id, data, parentId, selected }: NodeProps<PaintedC
       <div className="bg-card relative z-20 flex h-9 shrink-0 items-center gap-2 border-b px-3 pr-10 text-sm font-medium shadow-sm">
         <ImageIcon className="size-4" />
         Painted
+        {isGenerating ? (
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="destructive"
+            title="Stop edit"
+            aria-label="Stop edit"
+            className="nodrag nopan ml-auto"
+            onClick={stopGeneration}
+          >
+            <Square className="fill-current" />
+          </Button>
+        ) : null}
       </div>
 
-      <div className="bg-muted/40 relative flex flex-1 items-center justify-center">
+      <div className="bg-muted/40 relative flex items-center justify-center">
         {mainImageUrl ? (
           <>
             <ImagePreviewDialog
@@ -188,7 +577,7 @@ export function PaintedNode({ id, data, parentId, selected }: NodeProps<PaintedC
               trigger={
                 <button
                   type="button"
-                  className="nodrag nopan focus-visible:ring-ring h-full min-h-0 w-full min-w-0 cursor-zoom-in overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset"
+                  className="nodrag nopan focus-visible:ring-ring h-full min-h-0 max-h-[220px] w-full min-w-0 cursor-zoom-in overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset"
                   aria-label="Enlarge painted image"
                   title="Enlarge image"
                 >
@@ -202,12 +591,23 @@ export function PaintedNode({ id, data, parentId, selected }: NodeProps<PaintedC
                 </button>
               }
             />
+            {/* Region overlay entry — open the draw editor. */}
+            <button
+              type="button"
+              onClick={() => setOverlayOpen(true)}
+              title={regionCount > 0 ? "Edit regions" : "Draw a region"}
+              className="nodrag nopan absolute top-1.5 left-1.5 z-10 rounded bg-black/45 px-1 text-[0.55rem] text-white/90 hover:bg-black/70"
+            >
+              {regionCount > 0
+                ? `${regionCount} region${regionCount === 1 ? "" : "s"} · click to edit`
+                : "Draw region"}
+            </button>
             {/* Replace (re-upload / re-paste) */}
             <button
               type="button"
               aria-label="Replace image"
               title="Replace image"
-              className="nodrag nopan bg-background/85 focus-visible:ring-ring absolute top-2 left-2 flex size-7 items-center justify-center rounded-md border shadow-sm backdrop-blur-sm outline-none focus-visible:ring-2"
+              className="nodrag nopan bg-background/85 focus-visible:ring-ring absolute top-1.5 right-11 z-10 flex size-7 items-center justify-center rounded-md border shadow-sm backdrop-blur-sm outline-none focus-visible:ring-2"
               onClick={() => fileInputRef.current?.click()}
             >
               <Upload className="size-3.5" />
@@ -217,7 +617,7 @@ export function PaintedNode({ id, data, parentId, selected }: NodeProps<PaintedC
               type="button"
               draggable
               title="Drag onto a Generate/G2 node to use as a reference image"
-              className="nodrag bg-background/85 focus-visible:ring-ring absolute top-2 right-2 flex size-7 cursor-grab items-center justify-center rounded-md border shadow-sm backdrop-blur-sm outline-none focus-visible:ring-2 active:cursor-grabbing"
+              className="nodrag bg-background/85 focus-visible:ring-ring absolute top-1.5 right-2 z-10 flex size-7 cursor-grab items-center justify-center rounded-md border shadow-sm backdrop-blur-sm outline-none focus-visible:ring-2 active:cursor-grabbing"
               onDragStart={(e) => {
                 e.dataTransfer.setData("application/ica-image-url", mainImageUrl);
                 writeImageRefDrag(e.dataTransfer, {
@@ -237,19 +637,27 @@ export function PaintedNode({ id, data, parentId, selected }: NodeProps<PaintedC
                 type="button"
                 aria-label={override ? "Clear pasted image" : "Disconnect wired image"}
                 title={override ? "Clear pasted image" : "Disconnect wired image"}
-                className="nodrag nopan bg-background/90 text-foreground absolute top-2 right-11 flex size-5 items-center justify-center rounded-sm shadow-sm"
+                className="nodrag nopan bg-background/90 text-foreground absolute top-1.5 right-20 z-10 flex size-5 items-center justify-center rounded-sm shadow-sm"
                 onClick={override ? clearOverride : disconnectWire}
               >
                 <X className="size-3" />
               </button>
             )}
-            {/* Source badge: which path provided the image. */}
-            <span className="nodrag nopan absolute bottom-1 left-1 rounded bg-black/55 px-1 text-[0.6rem] text-white">
-              {override ? "pasted" : "wired"}
-            </span>
+            {/* Alias badge: which source the wired image came from (e.g. "@supplier"). */}
+            {!override && wiredAlias ? (
+              <span className="nodrag nopan absolute bottom-1 left-1 z-10 rounded bg-black/55 px-1 text-[0.6rem] text-white">
+                @{wiredAlias}
+              </span>
+            ) : (
+              <span className="nodrag nopan absolute bottom-1 left-1 z-10 rounded bg-black/55 px-1 text-[0.6rem] text-white">
+                {override ? "pasted" : "wired"}
+              </span>
+            )}
           </>
         ) : uploading ? (
-          <Loader2 className="text-muted-foreground size-6 animate-spin" />
+          <div className="flex min-h-28 items-center justify-center">
+            <Loader2 className="text-muted-foreground size-6 animate-spin" />
+          </div>
         ) : (
           <div
             onDragOver={(e) => e.preventDefault()}
@@ -284,8 +692,194 @@ export function PaintedNode({ id, data, parentId, selected }: NodeProps<PaintedC
         />
       </div>
 
+      {/* ── Edit controls: prompt + options + Edit Region ─────────────────── */}
+      <div className="nodrag nopan bg-card flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
+        <div className="grid gap-1">
+          <span className="text-muted-foreground text-xs">
+            Prompt <span className="text-[0.6rem]">· use @{wiredAlias ?? "main"} to reference the wired image</span>
+          </span>
+          <G2MentionTextarea
+            value={prompt}
+            disabled={isGenerating}
+            aliases={mentionCandidates}
+            onChange={(value) => updateNodeData(id, { prompt: value })}
+            placeholder='e.g. "re-render the selected region as brushed steel, keep the original lighting"'
+          />
+        </div>
+
+        <div className="grid gap-1">
+          <span className="text-muted-foreground text-xs">Model</span>
+          <Select
+            value={model}
+            disabled={isGenerating}
+            onValueChange={(value) => updateNodeData(id, { model: normalizeImageGenerationModel(value) })}
+          >
+            <SelectTrigger className="nodrag nopan w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align="start" className="nodrag nopan">
+              <SelectGroup>
+                <SelectLabel>Latest first</SelectLabel>
+                {PAINTED_GPT_MODEL_OPTIONS.filter((o) => o.status === "current").map((option) => (
+                  <SelectItem key={option.model} value={option.model} disabled={!option.enabled}>
+                    <span className="flex flex-col items-start">
+                      <span>{option.label}</span>
+                      <span className="text-muted-foreground text-[0.65rem]">
+                        {option.enabled ? option.description : (option.disabledReason ?? option.description)}
+                      </span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+              <SelectGroup>
+                <SelectLabel>Legacy</SelectLabel>
+                {PAINTED_GPT_MODEL_OPTIONS.filter((o) => o.status === "legacy").map((option) => (
+                  <SelectItem key={option.model} value={option.model}>
+                    <span className="flex flex-col items-start">
+                      <span>{option.label}</span>
+                      <span className="text-muted-foreground text-[0.65rem]">{option.description}</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="grid grid-cols-3 gap-2">
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="text-muted-foreground text-xs">Resolution</span>
+            <Select
+              value={resolution}
+              disabled={isGenerating}
+              onValueChange={(value) => updateNodeData(id, { resolution: normalizeImageGenerationResolution(value) })}
+            >
+              <SelectTrigger className="nodrag nopan w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="start" className="nodrag nopan">
+                {IMAGE_GENERATION_RESOLUTIONS.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {RESOLUTION_LABELS[option]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="text-muted-foreground text-xs">Size</span>
+            <Select
+              value={size}
+              disabled={isGenerating}
+              onValueChange={(value) => updateNodeData(id, { size: normalizeImageGenerationSize(value) })}
+            >
+              <SelectTrigger className="nodrag nopan w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="start" className="nodrag nopan">
+                {IMAGE_GENERATION_SIZES.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    <span className="flex flex-col items-start">
+                      <span>{SIZE_LABELS[option]}</span>
+                      <span className="text-muted-foreground font-mono text-[0.65rem]">{option}</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="text-muted-foreground text-xs">Format</span>
+            <Select
+              value={isGptModel ? "png" : outputFormat}
+              disabled={isGenerating || isGptModel}
+              onValueChange={(value) => updateNodeData(id, { outputFormat: normalizeImageGenerationOutputFormat(value) })}
+            >
+              <SelectTrigger className="nodrag nopan w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="start" className="nodrag nopan">
+                {IMAGE_GENERATION_OUTPUT_FORMATS.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {FORMAT_LABELS[option]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <p className="text-muted-foreground truncate font-mono text-[0.65rem]">
+          {model}
+          {isGptModel ? " · output pinned to PNG" : null}
+        </p>
+
+        {regionCount > 0 ? (
+          <label className="nodrag nopan flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={matchSourceSize}
+              disabled={isGenerating}
+              onChange={(event) => updateNodeData(id, { matchSourceSize: event.target.checked })}
+            />
+            <span>Match source size (recommended with mask)</span>
+          </label>
+        ) : null}
+
+        <ConfirmDialog
+          title={connectedOutputHasImage ? "Replace output image?" : "Edit region?"}
+          description={
+            connectedOutputHasImage
+              ? "This will replace the current Output image. Download it first if you need to keep it."
+              : `Re-render the region using ${model} with ${regionCount} region(s). This may use API credits.`
+          }
+          confirmLabel="Edit"
+          destructive={false}
+          onConfirm={() => void onEditRegion()}
+          trigger={
+            <Button
+              type="button"
+              size="sm"
+              disabled={
+                isGenerating || !hasOutput || !mainImageUrl || !prompt.trim() || regionCount === 0
+              }
+              className={cn("nodrag nopan w-full", isGenerating && "cursor-not-allowed")}
+            >
+              {isGenerating ? <Loader2 className="animate-spin" /> : <Wand2 />}
+              {isGenerating ? "Editing..." : "Edit Region"}
+            </Button>
+          }
+        />
+        {!hasOutput && <p className="text-muted-foreground text-xs">Connect an Output node.</p>}
+        {!mainImageUrl && <p className="text-muted-foreground text-xs">Add a main image.</p>}
+        {regionCount === 0 && mainImageUrl && (
+          <button
+            type="button"
+            onClick={() => setOverlayOpen(true)}
+            className="nodrag nopan text-left text-xs text-primary hover:underline"
+          >
+            Click the image to draw a region (Rect or Brush).
+          </button>
+        )}
+        {data.status === "error" && data.error ? (
+          <p className="text-destructive text-xs">{data.error}</p>
+        ) : null}
+      </div>
+
       <OutputPort color={NODE_PORT_COLORS.painted} />
-      <ResizeHandle nodeId={id} width={width} height={height} minWidth={140} minHeight={140} />
+      <ResizeHandle nodeId={id} width={width} height={height} minWidth={200} minHeight={320} />
+
+      {mainImageUrl && (
+        <G2DrawOverlay
+          open={overlayOpen}
+          onOpenChange={setOverlayOpen}
+          imageUrl={mainImageUrl}
+          regions={paintedRegions}
+          undoStack={paintedUndoStack}
+          redoStack={paintedRedoStack}
+          onCommit={commitRegions}
+        />
+      )}
     </div>
   );
 }

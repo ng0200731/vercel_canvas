@@ -19,12 +19,17 @@ export const SUPPLIER_MATCH_LABELSTASH_MODEL = "labelstash-local-visual-v1" as c
  *  with the X-API-Key header. Searches your org's previously-uploaded portal
  *  catalog — there is no upload API and no per-supplier filter. */
 export const SUPPLIER_MATCH_ELAND_MODEL = "eland-portal-v1" as const;
+/** Google Gemini multi-modal image embedding (gemini-embedding-2, 768-dim).
+ *  Embeds the reference + each selected-supplier catalog image server-side and
+ *  cosine-ranks them in process — no Python sidecar, no external catalog. */
+export const SUPPLIER_MATCH_GEMINI_MODEL = "gemini-embedding-2" as const;
 export const SUPPLIER_MATCH_ENGINES = [
   "picture-sherlock",
   "milvus",
   "local",
   "labelstash",
   "eland",
+  "gemini",
 ] as const;
 export type SupplierMatchEngine = (typeof SUPPLIER_MATCH_ENGINES)[number];
 export const SUPPLIER_MATCH_MODELS = [
@@ -33,6 +38,7 @@ export const SUPPLIER_MATCH_MODELS = [
   SUPPLIER_MATCH_MILVUS_MODEL,
   SUPPLIER_MATCH_LABELSTASH_MODEL,
   SUPPLIER_MATCH_ELAND_MODEL,
+  SUPPLIER_MATCH_GEMINI_MODEL,
 ] as const;
 /** @deprecated Prefer SUPPLIER_MATCH_LOCAL_MODEL / SUPPLIER_MATCH_MODELS. */
 export const SUPPLIER_MATCH_MODEL = SUPPLIER_MATCH_LOCAL_MODEL;

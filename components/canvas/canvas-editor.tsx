@@ -829,6 +829,21 @@ function findG2ImageReferences(
       push({ kind: "pantone", alias, label, swatchHex });
       continue;
     }
+
+    if (node.type === "painted") {
+      const imageUrl =
+        typeof node.data.mainImageUrl === "string" && node.data.mainImageUrl
+          ? node.data.mainImageUrl
+          : null;
+      if (!imageUrl) continue;
+      const alias =
+        typeof node.data.alias === "string" && node.data.alias.trim()
+          ? node.data.alias.trim()
+          : "painted";
+      const label = alias;
+      push({ kind: "image", alias, label, imageUrl, masks: [] });
+      continue;
+    }
   }
 
   // No explicit main edge and exactly one un_ROLEd reference → promote it to
@@ -1241,7 +1256,7 @@ function Editor({
       // Pantone dropped on "main" is silently rerouted to "reference" by
       // findG2ImageReferences (it can't carry a mask), so allow the edge here
       // and let the role resolver sort it out.
-      const imageType = ["image", "imageOutput", "imageInput", "suppler", "product", "pantone"].includes(
+      const imageType = ["image", "imageOutput", "imageInput", "suppler", "product", "pantone", "painted"].includes(
         source.type ?? "",
       );
       if (!imageType) return false;
@@ -1736,28 +1751,50 @@ function Editor({
       const currentNodes = nodesRef.current;
       const currentEdges = edgesRef.current;
       const targetNode = currentNodes.find((node) => node.id === nodeId);
-      if (!targetNode || (targetNode.type !== "generate" && targetNode.type !== "imageOutput")) {
+      if (
+        !targetNode ||
+        (targetNode.type !== "generate" &&
+          targetNode.type !== "imageOutput" &&
+          targetNode.type !== "painted")
+      ) {
         return false;
       }
 
       const generateNodeIds = new Set<string>();
       const outputNodeIds = new Set<string>();
-      if (targetNode.type === "generate") {
+      if (targetNode.type === "generate" || targetNode.type === "painted") {
         generateNodeIds.add(targetNode.id);
       } else {
         outputNodeIds.add(targetNode.id);
-        for (const generateNodeId of findConnectedNodeIdsByType(
+        // An imageOutput may be fed by a `generate` OR a `painted` node — both
+        // own generation runs. A painted node acts as a run owner just like a
+        // generate node (see cancelGenerationRun above).
+        for (const runOwnerId of findConnectedNodeIdsByType(
           currentNodes,
           currentEdges,
           targetNode.id,
           "generate",
         )) {
-          const generateNode = currentNodes.find((node) => node.id === generateNodeId);
+          const runOwnerNode = currentNodes.find((node) => node.id === runOwnerId);
           if (
-            generationRunManagerRef.current.has(generateNodeId) ||
-            generateNode?.data.status === "loading"
+            generationRunManagerRef.current.has(runOwnerId) ||
+            runOwnerNode?.data.status === "loading"
           ) {
-            generateNodeIds.add(generateNodeId);
+            generateNodeIds.add(runOwnerId);
+          }
+        }
+        for (const runOwnerId of findConnectedNodeIdsByType(
+          currentNodes,
+          currentEdges,
+          targetNode.id,
+          "painted",
+        )) {
+          const runOwnerNode = currentNodes.find((node) => node.id === runOwnerId);
+          if (
+            generationRunManagerRef.current.has(runOwnerId) ||
+            runOwnerNode?.data.status === "loading"
+          ) {
+            generateNodeIds.add(runOwnerId);
           }
         }
       }
