@@ -419,4 +419,14 @@ export const localWorkspaceRecordStore: WorkspaceRecordStore = {
     await saveLocalGenericNodes(next);
     return next;
   },
+
+  async getAppSetting(key) {
+    const all = read<Record<string, unknown>>("ica:workspace:app-settings", {});
+    return key in all ? (all[key] ?? null) : null;
+  },
+
+  async setAppSetting(key, value) {
+    const all = read<Record<string, unknown>>("ica:workspace:app-settings", {});
+    write("ica:workspace:app-settings", { ...all, [key]: value });
+  },
 };

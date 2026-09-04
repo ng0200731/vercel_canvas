@@ -146,6 +146,7 @@ function isSettingsSchemaCacheMismatch(message: string): boolean {
     "replace_workspace_options",
     "reorder_generic_node_definitions",
     "is_favorite",
+    "app_settings",
   ].some((name) => message.includes(name));
 }
 
@@ -667,6 +668,34 @@ export function createSupabaseWorkspaceRecordStore(): WorkspaceRecordStore {
         assertNoError({ error }, "reorderGenericNodeDefinitions");
       }
       return toUnknownArray(data).map(mapGenericNodeDefinition);
+    },
+
+    async getAppSetting(key) {
+      const { data, error } = await supabase
+        .from("app_settings")
+        .select("value")
+        .eq("key", key)
+        .maybeSingle();
+      if (error) {
+        if (isSettingsSchemaCacheMismatch(error.message)) {
+          return localWorkspaceRecordStore.getAppSetting(key);
+        }
+        assertNoError({ error }, "getAppSetting");
+      }
+      return data?.value ?? null;
+    },
+
+    async setAppSetting(key, value) {
+      const userId = await getCurrentUserId();
+      const { error } = await supabase
+        .from("app_settings")
+        .upsert({ user_id: userId, key, value }, { onConflict: "user_id,key" });
+      if (error) {
+        if (isSettingsSchemaCacheMismatch(error.message)) {
+          return localWorkspaceRecordStore.setAppSetting(key, value);
+        }
+        assertNoError({ error }, "setAppSetting");
+      }
     },
   };
 }

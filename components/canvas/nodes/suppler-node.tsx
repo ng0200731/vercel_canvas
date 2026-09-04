@@ -479,6 +479,36 @@ export function SupplerNode({ id, data, parentId, selected }: NodeProps<SupplerC
                 </Button>
               }
             />
+            <SupplierImageManagementDialog
+              products={selectedSupplierCatalogProducts}
+              suppliers={selectedSupplier ? [selectedSupplier] : []}
+              isCatalogLoading={suppliers.isLoading || products.isLoading}
+              catalogError={
+                !data.supplierId
+                  ? "Select a supplier before searching its product images."
+                  : suppliers.error instanceof Error
+                    ? suppliers.error.message
+                    : products.error instanceof Error
+                      ? products.error.message
+                      : null
+              }
+              currentSupplierId={data.supplierId}
+              selectedItemId={selectedGalleryItemId}
+              engine="gemini"
+              onSelect={selectProductImage}
+              trigger={
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="outline"
+                  aria-label="Search similar supplier product images"
+                  title="Search similar supplier product images"
+                  className="nodrag"
+                >
+                  <Search />
+                </Button>
+              }
+            />
             {data.supplierId ? (
               <ProductImageBrowserDialog
                 products={selectedSupplierProducts}

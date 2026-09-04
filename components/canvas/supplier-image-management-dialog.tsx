@@ -438,6 +438,9 @@ function RankedMatchCard({
             {Math.round(match.similarity)}
             <span className="text-muted-foreground text-xs">%</span>
           </p>
+          <p className="text-muted-foreground font-mono text-[0.65rem] tabular-nums">
+            cosine {match.cosine.toFixed(3)}
+          </p>
           <SimilarityMeter value={match.similarity} />
         </div>
         <Button type="button" variant={rank === 1 ? "default" : "outline"} onClick={onCompare}>
@@ -1135,8 +1138,9 @@ export function SupplierImageManagementDialog({
                       </h3>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Badge variant="outline">
-                        {Math.round(comparisonMatch.match.similarity)}% similarity
+                      <Badge variant="outline" className="font-mono tabular-nums">
+                        {Math.round(comparisonMatch.match.similarity)}% · cosine{" "}
+                        {comparisonMatch.match.cosine.toFixed(3)}
                       </Badge>
                       <Button
                         type="button"

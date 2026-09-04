@@ -35,6 +35,11 @@ export interface WorkspaceRecordStore {
   ): Promise<GenericNodeDefinition>;
   deleteGenericNodeDefinition(id: string): Promise<void>;
   reorderGenericNodeDefinitions(orderedIds: string[]): Promise<GenericNodeDefinition[]>;
+  /** Read a scalar per-user app setting by key (e.g. "gemini-match-min-cosine").
+   *  Returns null when no row exists (the caller then falls back to its env default). */
+  getAppSetting(key: string): Promise<unknown | null>;
+  /** Persist a scalar per-user app setting by key (overwrites any existing row). */
+  setAppSetting(key: string, value: unknown): Promise<void>;
 }
 
 export type WorkspaceRecordKind = "customer" | "supplier" | "product";

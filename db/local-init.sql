@@ -335,6 +335,18 @@ CREATE TABLE IF NOT EXISTS public.generic_node_definitions (
   UNIQUE (user_id, name)
 );
 
+-- ── Scalar per-user app settings (live, UI-editable overrides of server env
+--    defaults such as GEMINI_MATCH_MIN_COSINE). One row per (user, key). ──
+CREATE TABLE IF NOT EXISTS public.app_settings (
+  user_id    uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  key        text NOT NULL,
+  value      jsonb NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, key),
+  CHECK (key IN ('gemini-match-min-cosine'))
+);
+
+
 -- ── updated_at helper ───────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION public.touch_updated_at()
 RETURNS trigger
@@ -353,7 +365,8 @@ BEGIN
   FOREACH t IN ARRAY ARRAY[
     'projects', 'canvases', 'canvas_nodes', 'canvas_edges', 'sample_orders',
     'customers', 'customer_employees', 'suppliers', 'supplier_employees',
-    'products', 'product_variants', 'workspace_options', 'generic_node_definitions'
+    'products', 'product_variants', 'workspace_options', 'generic_node_definitions',
+    'app_settings'
   ]
   LOOP
     EXECUTE format('DROP TRIGGER IF EXISTS %I_touch_updated_at ON public.%I', t, t);

@@ -709,5 +709,24 @@ export function createPostgresWorkspaceRecordStore(): WorkspaceRecordStore {
         return rows.rows.map(mapGenericNode);
       });
     },
+
+    async getAppSetting(key) {
+      await ensureLocalProfile();
+      const row = await queryOne<{ value: unknown }>(
+        `SELECT value FROM public.app_settings WHERE user_id = $1 AND key = $2`,
+        [localUserId, key],
+      );
+      return row?.value ?? null;
+    },
+
+    async setAppSetting(key, value) {
+      await ensureLocalProfile();
+      await query(
+        `INSERT INTO public.app_settings (user_id, key, value, updated_at)
+         VALUES ($1, $2, $3::jsonb, now())
+         ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+        [localUserId, key, JSON.stringify(value)],
+      );
+    },
   };
 }

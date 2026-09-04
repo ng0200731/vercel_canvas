@@ -21,6 +21,7 @@ import { CanvasList } from "@/components/projects/canvas-list";
 import { ProjectHeader } from "@/components/projects/project-header";
 import { ProjectList } from "@/components/projects/project-list";
 import { GenericNodeSettingsPanel } from "@/components/settings/generic-node-settings-panel";
+import { GeminiSearchSettingsPanel } from "@/components/settings/gemini-search-settings-panel";
 import { OrderedOptionSettingsPanel } from "@/components/settings/ordered-option-settings-panel";
 import { SmtpSettingsPanel } from "@/components/settings/smtp-settings-panel";
 import { EntityWorkspacePanel } from "@/components/welcome/entity-workspace-panel";
@@ -38,7 +39,8 @@ type TabId =
   | "currency-settings"
   | "destination-country-settings"
   | "address-book-settings"
-  | "generic-node-settings";
+  | "generic-node-settings"
+  | "gemini-settings";
 type WorkspaceMode = "new" | "records";
 
 interface MenuItem {
@@ -116,6 +118,7 @@ const sections: MenuSection[] = [
       { label: "Destination country", tab: "destination-country-settings" },
       { label: "Address book", tab: "address-book-settings" },
       { label: "Generic node", tab: "generic-node-settings" },
+      { label: "Gemini image search", tab: "gemini-settings" },
     ],
   },
 ];
@@ -131,6 +134,7 @@ const tabLabels: Record<TabId, string> = {
   "destination-country-settings": "Destination Country",
   "address-book-settings": "Address Book",
   "generic-node-settings": "Generic Node",
+  "gemini-settings": "Gemini Image Search",
 };
 
 function sectionForTab(tabId: TabId): SectionId {
@@ -253,6 +257,7 @@ function renderTabContent({
     return <OrderedOptionSettingsPanel kind="destination-country" />;
   if (tabId === "address-book-settings") return <OrderedOptionSettingsPanel kind="address-book" />;
   if (tabId === "generic-node-settings") return <GenericNodeSettingsPanel />;
+  if (tabId === "gemini-settings") return <GeminiSearchSettingsPanel />;
   if (tabId === "customer")
     return (
       <EntityWorkspacePanel

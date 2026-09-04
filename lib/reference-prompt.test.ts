@@ -160,4 +160,48 @@ describe("reference prompt compiler", () => {
       "https://images.example/elastic.png",
     ]);
   });
+
+  // Painted node two-image shape: the painted node's OWN image is the base
+  // (alias "painted", carries the mask) and the wired supplier is an auxiliary
+  // reference (alias "supplier") the "@supplier" mention resolves to. This is
+  // the call shape the Painted edit produces when both an override and a wire
+  // are present — it must send two images and paste the supplier into the mask.
+  it("pastes the supplier into the painted base region (two-image painted shape)", () => {
+    const compiled = compileReferencePrompt(
+      "@painted: change region-1 color to @supplier (apply to region-1)",
+      [
+        {
+          kind: "image",
+          alias: "painted",
+          url: "https://images.example/painted.png",
+          maskUrl: "https://images.example/painted-mask.png",
+        },
+        { kind: "image", alias: "supplier", url: "https://images.example/supplier.png" },
+      ],
+    );
+
+    // Two images are attached: base+mask (image[0]) and supplier (image[1]).
+    expect(compiled.imageUrls).toEqual([
+      "https://images.example/painted.png",
+      "https://images.example/supplier.png",
+    ]);
+    expect(compiled.maskUrl).toBe("https://images.example/painted-mask.png");
+    // The base (mask carrier) is ordered first regardless of array order.
+    expect(compiled.prompt).toContain("Provider image 1 is @painted");
+    expect(compiled.prompt).toContain("Provider image 2 is @supplier");
+    // The object/material constraint fires because "region" is mentioned and
+    // both @painted and @supplier are referenced. target = base, source = the
+    // thing being pasted from.
+    expect(compiled.prompt).toContain("Object/material-transfer constraint:");
+    expect(compiled.prompt).toContain("Use @painted as the target/base image");
+    expect(compiled.prompt).toContain("Use @supplier only as the source of the new object");
+    // The colour-transfer constraint also fires ("color" keyword + two refs).
+    expect(compiled.prompt).toContain("Color-transfer constraint:");
+    expect(compiled.prompt).toContain("Provider image 2 / @supplier is only a color reference");
+    // Paste-source guidance names the supplier as the SOURCE into the base mask.
+    expect(compiled.prompt).toContain(
+      "Provider image 2 / @supplier: this is the SOURCE to place INTO the transparent region of @painted",
+    );
+    expect(compiled.prompt).toContain("MASK GUIDANCE");
+  });
 });

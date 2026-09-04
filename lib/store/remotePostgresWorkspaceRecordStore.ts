@@ -68,4 +68,8 @@ export const remotePostgresWorkspaceRecordStore: WorkspaceRecordStore = {
     callLocalWorkspaceStore<GenericNodeDefinition[]>("reorderGenericNodeDefinitions", [
       orderedIds,
     ]),
+  getAppSetting: (key: string) =>
+    callLocalWorkspaceStore<unknown | null>("getAppSetting", [key]),
+  setAppSetting: (key: string, value: unknown) =>
+    callLocalWorkspaceStore<void>("setAppSetting", [key, value]),
 };

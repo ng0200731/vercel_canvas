@@ -45,6 +45,19 @@ const optionalInt = z.preprocess((value) => {
   return value;
 }, z.number().int().optional());
 
+const optionalNumber = z.preprocess((value) => {
+  if (value === "" || value === undefined) return undefined;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : value;
+  }
+  return value;
+}, z.number().optional());
+
+function optionalNumberDefault(defaultValue: number) {
+  return optionalNumber.transform((value) => value ?? defaultValue);
+}
+
 function optionalIntDefault(defaultValue: number) {
   return optionalInt.transform((value) => value ?? defaultValue);
 }
@@ -116,6 +129,13 @@ const envSchema = z
       z.number().int().min(1_000).max(300_000),
     ),
     GEMINI_MATCH_TOP_K: optionalIntDefault(12).pipe(z.number().int().min(1).max(100)),
+    // Minimum cosine similarity [-1, 1] for a catalog image to be surfaced as a
+    // Gemini match. Results below this are dropped before top-K truncation, so
+    // the % column no longer shows "8X%" near-misses that look visually off.
+    // Leave unset (or 0) to keep the original "rank everything" behaviour.
+    GEMINI_MATCH_MIN_COSINE: optionalNumberDefault(0).pipe(
+      z.number().min(-1).max(1),
+    ),
     GEMINI_MATCH_FALLBACK_TO_LOCAL: optionalBoolean.default(false),
 
     // SMTP (optional, server-only). An optional local catcher overrides 163.com, then Gmail.
@@ -195,6 +215,7 @@ function loadEnv(): Env {
     GEMINI_EMBEDDING_DIM: process.env.GEMINI_EMBEDDING_DIM,
     GEMINI_EMBEDDING_TIMEOUT_MS: process.env.GEMINI_EMBEDDING_TIMEOUT_MS,
     GEMINI_MATCH_TOP_K: process.env.GEMINI_MATCH_TOP_K,
+    GEMINI_MATCH_MIN_COSINE: process.env.GEMINI_MATCH_MIN_COSINE,
     GEMINI_MATCH_FALLBACK_TO_LOCAL: process.env.GEMINI_MATCH_FALLBACK_TO_LOCAL,
     SMTP_163_USERNAME: process.env.SMTP_163_USERNAME,
     SMTP_163_PASSWORD: process.env.SMTP_163_PASSWORD,

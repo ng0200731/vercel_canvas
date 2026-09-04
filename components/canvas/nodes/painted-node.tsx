@@ -95,6 +95,35 @@ export function resolvePaintedMainImage(input: {
   return input.wired;
 }
 
+/**
+ * Decide the alias roles for a Painted region edit.
+ *
+ * When the Painted node has its OWN pasted/dropped image (override) AND a
+ * wired source, the canvas sends TWO images to the provider: the own image is
+ * the base/mask carrier (this is what gets edited) and the wired source is an
+ * auxiliary reference pasted INTO the masked region (the thing `@supplier`
+ * resolves to). That mirrors G2's main + references split and is what lets the
+ * server-side object/color/material constraints fire (they need >=2 mentioned
+ * images).
+ *
+ * When there is no own image, the wired source is the base itself (wire-only)
+ * — same single-image behavior as before, so a standalone-wired Painted node
+ * still works. Exported so a unit test can pin the decision.
+ */
+export function resolvePaintedEditAliases(input: {
+  override: boolean;
+  overrideUrl: string | null;
+  wiredAlias: string | null;
+  dataAlias: string | null | undefined;
+}): { baseAlias: string; supplierAlias: string | null } {
+  const hasOwn = input.override && Boolean(input.overrideUrl);
+  const ownAlias = input.dataAlias && input.dataAlias.trim() ? input.dataAlias.trim() : "painted";
+  if (hasOwn) {
+    return { baseAlias: ownAlias, supplierAlias: input.wiredAlias ?? "supplier" };
+  }
+  return { baseAlias: input.wiredAlias ?? ownAlias, supplierAlias: null };
+}
+
 // ── Generation option label maps ─────────────────────────────────────────
 // Duplicated from g2-node.tsx — they are plain literal maps not exported by
 // lib/image-generation-models, and the user asked to NOT extract a shared
@@ -208,9 +237,25 @@ export function PaintedNode({ id, data, parentId, selected }: NodeProps<PaintedC
 
   // ── @alias mention candidates ───────────────────────────────────────────────
   // The wired supplier (or other) source becomes a mentionable @alias so the
-  // user can reference it in the prompt. Same candidate shape as G2's dropdown.
+  // user can reference it in the prompt. When the Painted node also has its own
+  // image, surface that as a separate base @alias too — the prompt may name
+  // both ("@painted … to @supplier"). Same candidate shape as G2's dropdown.
+  const { baseAlias } = resolvePaintedEditAliases({
+    override,
+    overrideUrl,
+    wiredAlias,
+    dataAlias: typeof data.alias === "string" ? data.alias : null,
+  });
   const mentionCandidates: MentionCandidate[] = useMemo(() => {
     const candidates: MentionCandidate[] = [];
+    if (override && overrideUrl) {
+      candidates.push({
+        id,
+        alias: baseAlias,
+        label: "Painted image",
+        group: "Base",
+      });
+    }
     if (wired) {
       candidates.push({
         id: wiredNodeId ?? "wired",
@@ -220,7 +265,7 @@ export function PaintedNode({ id, data, parentId, selected }: NodeProps<PaintedC
       });
     }
     return candidates;
-  }, [wired, wiredNodeId, wiredAlias, wiredLabel]);
+  }, [override, overrideUrl, wired, wiredNodeId, wiredAlias, wiredLabel, id, baseAlias]);
 
   // ── Generation options ───────────────────────────────────────────────────
   const model = normalizeImageGenerationModel(data.model ?? "gpt-image-2");
@@ -381,18 +426,32 @@ export function PaintedNode({ id, data, parentId, selected }: NodeProps<PaintedC
       // visibly "does not change" (it got the wrong colour or no displacement).
       // Fix: one Painted node == one region. We mask only region[0] and build
       // the prompt from that region's name regardless of other strokes.
-      // Base alias is the wired source's @alias when present (so the prompt's
-      // @supplier mention resolves to the wired supplier image), else fall back
-      // to the node's own alias, else "main".
-      const baseAlias =
-        wiredAlias ?? (typeof data.alias === "string" && data.alias ? data.alias : "main");
+      // ── Alias roles ────────────────────────────────────────────────────────
+      // When the Painted node has its OWN image (override) AND a wired source,
+      // we send TWO images: the own image is the base/mask carrier (the thing
+      // being edited), the wired source is an auxiliary reference pasted INTO
+      // the masked region — so the user's "@supplier" mention resolves to real
+      // source pixels and the server-side object/color constraints fire (they
+      // need >=2 mentioned images). Without that second reference the model
+      // only ever sees the base image + a mask and drifts to a generic recolor.
+      // Wire-only (no own image) keeps the single-image behavior: the wired
+      // source IS the base.
+      const { baseAlias, supplierAlias } = resolvePaintedEditAliases({
+        override,
+        overrideUrl,
+        wiredAlias,
+        dataAlias: typeof data.alias === "string" ? data.alias : null,
+      });
       const mentionToken = `@${baseAlias}`;
       const activeRegion = paintedRegions[0]!;
       const activeRegionName = (activeRegion.name?.trim() || "region-1").replace(/\s+/g, "-");
       // If the user's prompt already mentions the region (e.g. "change region-1
-      // color to blue") use it verbatim; otherwise wrap their text as the
-      // instruction for the active region. Always anchor with @main so server-
-      // side colour/object constraints fire (they need a base-image mention).
+      // color to @supplier") use it verbatim; otherwise wrap their text as the
+      // instruction for the active region. Always anchor with the base @alias
+      // so it leads the prompt text — that puts the base at image[0] in the
+      // server's ordered list (the mask carrier) and the wired source (whose
+      // @alias the user typed) at image[1] as the paste source. Server-side
+      // colour/object constraints need a base-image mention to fire.
       let resolvedPrompt: string;
       if (prompt.includes(activeRegionName)) {
         resolvedPrompt = prompt.includes(mentionToken)
@@ -423,9 +482,12 @@ export function PaintedNode({ id, data, parentId, selected }: NodeProps<PaintedC
       const maskUrl = typeof maskJson.url === "string" ? maskJson.url : null;
       if (!maskUrl) throw new Error("Failed to get mask URL");
 
-      // Single reference: the main image carries the mask. alias matches the
-      // wired source's @alias (or the node's own alias) injected above so the
-      // server-side constraint that needs a base-image mention fires correctly.
+      // Reference list: the base (main image, carries the mask) is always
+      // entry 0. When the Painted node also has a wired source that is a
+      // separate image from the base (own override present), append it as a
+      // second reference so the server attaches it as image[1] — the paste
+      // source the user's @supplier mention resolves to. This mirrors G2's
+      // main + references shape and is what makes object/color transfer fire.
       const referenceList: ImageGenerationReference[] = [
         {
           kind: "image",
@@ -434,6 +496,9 @@ export function PaintedNode({ id, data, parentId, selected }: NodeProps<PaintedC
           maskUrl,
         },
       ];
+      if (override && overrideUrl && wired && supplierAlias) {
+        referenceList.push({ kind: "image", alias: supplierAlias, url: wired });
+      }
 
       const res = await fetch("/api/generate", {
         method: "POST",
@@ -511,6 +576,9 @@ export function PaintedNode({ id, data, parentId, selected }: NodeProps<PaintedC
     matchSourceSize,
     isGenerationRunCurrent,
     writeGeneratedImageToOutput,
+    override,
+    overrideUrl,
+    wired,
     data.alias,
     wiredAlias,
   ]);
@@ -643,8 +711,16 @@ export function PaintedNode({ id, data, parentId, selected }: NodeProps<PaintedC
                 <X className="size-3" />
               </button>
             )}
-            {/* Alias badge: which source the wired image came from (e.g. "@supplier"). */}
-            {!override && wiredAlias ? (
+            {/* Alias badge: when a wired source is also present show BOTH the
+                painted base alias and the wired source alias (two images get
+                sent); otherwise the single source's alias / a "pasted"/"wired"
+                pill. */}
+            {override && wiredAlias ? (
+              <div className="nodrag nopan absolute bottom-1 left-1 z-10 flex gap-1">
+                <span className="rounded bg-black/55 px-1 text-[0.6rem] text-white">@{baseAlias}</span>
+                <span className="rounded bg-black/55 px-1 text-[0.6rem] text-white">@{wiredAlias}</span>
+              </div>
+            ) : !override && wiredAlias ? (
               <span className="nodrag nopan absolute bottom-1 left-1 z-10 rounded bg-black/55 px-1 text-[0.6rem] text-white">
                 @{wiredAlias}
               </span>
@@ -696,7 +772,12 @@ export function PaintedNode({ id, data, parentId, selected }: NodeProps<PaintedC
       <div className="nodrag nopan bg-card flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
         <div className="grid gap-1">
           <span className="text-muted-foreground text-xs">
-            Prompt <span className="text-[0.6rem]">· use @{wiredAlias ?? "main"} to reference the wired image</span>
+            Prompt{" "}
+            <span className="text-[0.6rem]">
+              {override && wired
+                ? `· use @${baseAlias} for this image, @${wiredAlias ?? "supplier"} for the wired source`
+                : `· use @${wiredAlias ?? "main"} to reference the wired image`}
+            </span>
           </span>
           <G2MentionTextarea
             value={prompt}

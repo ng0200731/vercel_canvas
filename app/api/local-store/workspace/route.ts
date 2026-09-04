@@ -36,6 +36,8 @@ const METHODS = new Set<string>([
   "upsertGenericNodeDefinition",
   "deleteGenericNodeDefinition",
   "reorderGenericNodeDefinitions",
+  "getAppSetting",
+  "setAppSetting",
 ]);
 
 function assertLocalMode() {

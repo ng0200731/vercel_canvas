@@ -1,14 +1,33 @@
 import { NextResponse } from "next/server";
 
+import { createSupplierImageGeminiMatcher } from "@/lib/supplier-image-gemini";
+import { isLocalPostgresConfigured, isSupabaseConfigured } from "@/lib/env";
 import { supplierImageMatchRequestSchema } from "@/lib/supplier-image-match";
 import { matchSupplierImagesWithEland } from "@/lib/supplier-image-eland";
-import { matchSupplierImagesWithGemini } from "@/lib/supplier-image-gemini";
 import { matchSupplierImagesWithMilvus } from "@/lib/supplier-image-milvus";
 import { matchSupplierImagesWithPictureSherlock } from "@/lib/supplier-image-picture-sherlock";
 import { matchSupplierImages, type SupplierImageMatcher } from "@/lib/supplier-image-vector-match";
+import { createPostgresWorkspaceRecordStore } from "@/lib/store/postgresWorkspaceRecordStore";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
+
+/** Live, DB-backed override of GEMINI_MATCH_MIN_COSINE. Only the local-Postgres
+ *  mode ships a server-side store wired here (Supabase mode reads the same
+ *  app_settings row via its client path); when neither is configured, falls
+ *  back to the env default by returning null. Any DB error also returns null —
+ *  a settings-store failure must never break a search. */
+async function resolveGeminiMinCosine(): Promise<number | null> {
+  if (!isSupabaseConfigured && !isLocalPostgresConfigured) return null;
+  try {
+    const value = await createPostgresWorkspaceRecordStore().getAppSetting(
+      "gemini-match-min-cosine",
+    );
+    return typeof value === "number" ? value : null;
+  } catch {
+    return null;
+  }
+}
 
 interface SupplierImageMatchRouteDependencies {
   matchPictureSherlock: SupplierImageMatcher;
@@ -66,5 +85,5 @@ export const POST = createSupplierImageMatchPostHandler({
   matchMilvus: matchSupplierImagesWithMilvus,
   matchLocal: matchSupplierImages,
   matchEland: matchSupplierImagesWithEland,
-  matchGemini: matchSupplierImagesWithGemini,
+  matchGemini: createSupplierImageGeminiMatcher({ resolveMinCosine: resolveGeminiMinCosine }),
 });

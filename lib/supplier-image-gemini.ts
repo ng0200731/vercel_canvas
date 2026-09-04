@@ -34,6 +34,9 @@ export interface SupplierImageGeminiConfig {
   baseUrl: string;
   timeoutMs: number;
   topK: number;
+  /** Minimum cosine similarity [-1, 1] for a catalog image to be surfaced.
+   *  0 keeps the original "rank everything" behaviour. */
+  minCosine: number;
   fallbackToLocal: boolean;
 }
 
@@ -41,12 +44,16 @@ interface GeminiMatcherOptions {
   fetcher?: typeof fetch;
   config?: SupplierImageGeminiConfig | null;
   fallbackMatcher?: SupplierImageMatcher;
+  /** Per-request live override for `minCosine`. Resolved before each search so
+   *  a UI-persisted setting can take effect without a server restart. Returns
+   *  null/non-finite to keep the env-derived default. */
+  resolveMinCosine?: () => Promise<number | null>;
 }
 
 const geminiEmbedResponseSchema = z
   .object({
     embedding: z.object({ values: z.array(z.number().finite()) }).strict(),
-    usageMetadata: z.record(z.unknown()).optional(),
+    usageMetadata: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
 
@@ -76,6 +83,7 @@ export function buildSupplierImageGeminiConfig(
     | "GEMINI_EMBEDDING_DIM"
     | "GEMINI_EMBEDDING_TIMEOUT_MS"
     | "GEMINI_MATCH_TOP_K"
+    | "GEMINI_MATCH_MIN_COSINE"
     | "GEMINI_MATCH_FALLBACK_TO_LOCAL"
   >,
 ): SupplierImageGeminiConfig | null {
@@ -88,6 +96,7 @@ export function buildSupplierImageGeminiConfig(
     baseUrl: "https://generativelanguage.googleapis.com",
     timeoutMs: rawEnv.GEMINI_EMBEDDING_TIMEOUT_MS,
     topK: rawEnv.GEMINI_MATCH_TOP_K,
+    minCosine: rawEnv.GEMINI_MATCH_MIN_COSINE,
     fallbackToLocal: rawEnv.GEMINI_MATCH_FALLBACK_TO_LOCAL,
   };
 }
@@ -322,13 +331,17 @@ async function callGeminiMatch(
       !(entry instanceof Error) && entry !== undefined,
   );
 
-  // 3) Cosine-rank reference vs each catalog vector.
+  // 3) Cosine-rank reference vs each catalog vector. Drop anything below the
+  //    configured min-cosine threshold before top-K truncation, so the user no
+  //    longer sees visually-off 8X% near-misses padding the ranking. minCosine
+  //    defaults to 0 (keep all), preserving the original behaviour when unset.
   const matches = catalogVectors
     .map((entry) => ({
       catalogItemId: entry.catalogItemId,
       cosine: cosineSimilarity(referenceVector, entry.vector),
       similarity: 0,
     }))
+    .filter((entry) => entry.cosine >= config.minCosine)
     .map((partial) => ({
       ...partial,
       similarity: similarityPercentFromCosine(partial.cosine),
@@ -350,6 +363,7 @@ export function createSupplierImageGeminiMatcher({
   fetcher = fetch,
   config,
   fallbackMatcher,
+  resolveMinCosine,
 }: GeminiMatcherOptions = {}): SupplierImageMatcher {
   const resolvedConfig = getConfiguredGeminiConfig(config);
   const resolveFallback: SupplierImageMatcher =
@@ -364,10 +378,24 @@ export function createSupplierImageGeminiMatcher({
 
   return async function matchSupplierImagesWithGemini(rawInput, signal) {
     const input = supplierImageMatchRequestSchema.parse(rawInput);
+    // Resolve the live UI override (DB) before each search; non-finite/null
+    // keeps the env-derived default. This makes GEMINI_MATCH_MIN_COSINE
+    // adjustable from the Settings panel without a server restart.
+    let effectiveConfig = resolvedConfig;
+    if (resolveMinCosine) {
+      try {
+        const override = await resolveMinCosine();
+        if (override != null && Number.isFinite(override)) {
+          effectiveConfig = { ...resolvedConfig, minCosine: override };
+        }
+      } catch {
+        // A missing/unreachable DB must never fail the search; fall back to env.
+      }
+    }
     try {
-      return await callGeminiMatch(fetcher, resolvedConfig, input, signal);
+      return await callGeminiMatch(fetcher, effectiveConfig, input, signal);
     } catch (error) {
-      if (resolvedConfig.fallbackToLocal) {
+      if (effectiveConfig.fallbackToLocal) {
         return resolveFallback(input, signal);
       }
       throw error;
