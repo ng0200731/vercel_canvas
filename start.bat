@@ -64,6 +64,7 @@ if errorlevel 1 (
 )
 
 echo Starting the dev server at http://localhost:3000
+echo The browser will open the Supabase login page automatically.
 echo ^(Press Ctrl+C in this window to stop.^)
 echo.
 
@@ -95,7 +96,7 @@ if %NEED_ELEVATION% equ 1 (
 
 REM Open the browser a few seconds after the server starts (runs in parallel).
 REM `ping` is used as the delay because it works in any console context (timeout does not).
-start "" /min cmd /c "ping -n 5 127.0.0.1 >nul & start "" http://localhost:3000"
+start "" /min cmd /c "ping -n 5 127.0.0.1 >nul & start "" http://localhost:3000/login"
 
 call pnpm dev
 

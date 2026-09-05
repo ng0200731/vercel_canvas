@@ -220,9 +220,18 @@ export const productVariantRecordSchema = productVariantInputSchema.extend({
 export const productRecordInputSchema = z
   .object({
     ownerKind: z.enum(["supplier", "customer"]).default("supplier"),
-    supplierId: z.string().trim().min(1).nullable().optional(),
-    customerId: z.string().trim().min(1).nullable().optional(),
-    projectId: z.string().trim().min(1).nullable().optional(),
+    supplierId: z.preprocess(
+      (value) => (typeof value === "string" && value.trim() === "" ? null : value),
+      z.string().trim().nullable().optional(),
+    ),
+    customerId: z.preprocess(
+      (value) => (typeof value === "string" && value.trim() === "" ? null : value),
+      z.string().trim().nullable().optional(),
+    ),
+    projectId: z.preprocess(
+      (value) => (typeof value === "string" && value.trim() === "" ? null : value),
+      z.string().trim().nullable().optional(),
+    ),
     productType: z.union([z.enum(supplierProductTypes), z.enum(customerProductTypes)]),
     subject: z.string().trim().min(1, "Subject is required."),
     detail: z.string().trim().min(1, "Product detail is required."),

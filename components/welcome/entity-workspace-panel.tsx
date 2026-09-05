@@ -113,6 +113,8 @@ interface ProductFormState {
   ownerKind: ProductOwnerKind;
   supplierId: string;
   customerId: string;
+  projectId: string;
+  projectName: string;
   productType: WorkspaceProductType;
   subject: string;
   detail: string;
@@ -1135,6 +1137,8 @@ function getDummyProduct(
     ownerKind,
     supplierId: "",
     customerId: "",
+    projectId: "",
+    projectName: "",
     subject: `${label} sample ${parameterCycle + 1}`,
     detail: `Generic ${label.toLocaleLowerCase()} specification. Confirm construction, tolerance, finishing, packing, and production approval sample before bulk order.`,
     variants,
@@ -1172,6 +1176,8 @@ function emptyProductForm(
     ownerKind,
     supplierId: "",
     customerId: "",
+    projectId: "",
+    projectName: "",
     productType,
     subject: "",
     detail: "",
@@ -1220,7 +1226,9 @@ function buildProductInput(form: ProductFormState) {
   return {
     ownerKind: form.ownerKind,
     supplierId: form.ownerKind === "supplier" ? form.supplierId : null,
-    customerId: form.ownerKind === "customer" ? form.customerId : null,
+    customerId: form.ownerKind === "customer" ? form.customerId.trim() || null : null,
+    projectId:
+      form.ownerKind === "customer" && form.projectId.trim() ? form.projectId.trim() : null,
     productType: form.productType,
     subject: form.subject,
     detail: form.detail,
@@ -2622,6 +2630,8 @@ function ProductWorkspacePanel({
       ...next,
       supplierId: initialSupplierId ?? "",
       customerId: initialCustomerId ?? "",
+      projectId: "",
+      projectName: "",
       activeVariantId: next.variants[0]?.id ?? null,
     };
   });
@@ -2685,6 +2695,8 @@ function ProductWorkspacePanel({
       ...next,
       supplierId: initialSupplierId ?? "",
       customerId: initialCustomerId ?? "",
+      projectId: "",
+      projectName: "",
       activeVariantId: next.variants[0]?.id ?? null,
     });
     setImageError(null);
@@ -2856,7 +2868,9 @@ function ProductWorkspacePanel({
     setSubmitted(true);
     const result = productSchema.safeParse(buildProductInput(form));
     if (!result.success) {
-      toast.error(getFirstZodErrorMessage(result) ?? "Please complete the product form.");
+      const issue = result.error.issues[0];
+      const field = issue?.path.length ? ` (${issue.path.join(".")})` : "";
+      toast.error(`${issue?.message ?? "Please complete the product form."}${field}`);
       return;
     }
 
@@ -2894,6 +2908,8 @@ function ProductWorkspacePanel({
       ownerKind: product.ownerKind,
       supplierId: product.supplierId ?? "",
       customerId: product.customerId ?? "",
+      projectId: product.projectId ?? "",
+      projectName: "",
       productType,
       subject: product.subject,
       detail: product.detail,
@@ -3083,6 +3099,15 @@ function ProductWorkspacePanel({
             </Button>
           </div>
           <div className="grid gap-4">
+            {ownerKind === "customer" ? (
+              <FormField label="Customer project" error={errors.projectId}>
+                <Input
+                  value={form.projectName}
+                  onChange={(event) => setForm({ ...form, projectName: event.target.value, projectId: "" })}
+                  placeholder="Project name (optional)"
+                />
+              </FormField>
+            ) : null}
             {!embedded && ownerKind === "supplier" ? (
               <FormField label="Supplier" error={errors.supplierId}>
                 <div className="grid gap-2">

@@ -94,9 +94,30 @@ Switch back to cloud later by putting Supabase keys back into `.env.local`
 2. Project Settings → API → copy the **URL** and **anon** key into `.env.local`
    (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`). Add the
    **service_role** key as `SUPABASE_SERVICE_ROLE_KEY`.
-3. Run every SQL migration in `supabase/migrations/` in filename order via the
-   Supabase SQL editor or CLI.
-4. Restart `pnpm dev`. Auth, projects, and canvases now persist to Postgres.
+3. Run every SQL migration in `supabase/migrations/` in the documented order via the
+   Supabase SQL editor. The two files with the `0003` prefix must be run in this order:
+   `0003_image_model_details.sql`, then `0003_workspace_records.sql`. The current
+   repository does not yet have a CLI-safe unique migration history; do not run
+   `supabase db push` until those filenames are renumbered in a coordinated migration.
+4. Configure `NEXT_PUBLIC_APP_URL` with the deployed HTTPS origin and keep
+   `NEXT_PUBLIC_LOCAL_POSTGRES` unset/false in Vercel.
+5. Restart `pnpm dev`. Auth, projects, and canvases now persist to Postgres.
+
+In cloud mode, production uploads use the private `uploads` bucket and the
+`/api/images/file?path=...` route. It verifies the signed-in user's folder and
+redirects to a short-lived signed URL. Keep Storage paths as the canonical image
+identity; do not depend on permanent public URLs. Public canvas-send/sample-order
+recipients need an explicitly authorized, short-lived sharing flow.
+
+For an external local PostgreSQL migration, first create a manifest with
+`pnpm migration:manifest` (set `DATABASE_URL`, `LOCAL_UPLOAD_ROOT`, and
+`TARGET_USER_ID`). Review the manifest and perform a data-only `pg_dump` restore
+with the local owner UUID mapped to a real Supabase Auth user. To copy local
+assets, use `pnpm migration:manifest -- --upload --confirm` only after checking
+that the target bucket and user mapping are correct. The command is resumable
+for existing objects, but it intentionally does not import relational rows or
+rewrite URLs automatically; those steps require a reviewed migration procedure.
+Do not copy `.data/uploads` to Vercel's filesystem.
 
 Canvas persistence uses structured database tables:
 

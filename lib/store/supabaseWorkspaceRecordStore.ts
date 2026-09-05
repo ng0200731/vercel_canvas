@@ -390,7 +390,7 @@ export function createSupabaseWorkspaceRecordStore(): WorkspaceRecordStore {
         p_owner_kind: parsed.ownerKind,
         p_supplier_id: parsed.supplierId ?? null,
         p_customer_id: parsed.customerId ?? null,
-        p_project_id: null,
+        p_project_id: parsed.projectId ?? null,
         p_product_type: parsed.productType,
         p_subject: parsed.subject,
         p_detail: parsed.detail,
