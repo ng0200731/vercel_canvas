@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useMemo, useState, type FormEvent } from "react";
-import { Coins, Edit3, Heart, Mail, MapPin, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Coins, Edit3, Heart, Mail, MapPin, Plus, RefreshCw, Search, Tags, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { z } from "zod";
 
@@ -57,6 +57,12 @@ const panelCopy: Record<
     description: "Reusable email recipients for canvas sends.",
     singular: "address",
     searchPlaceholder: "Search name or email",
+  },
+  "supplier-product-type": {
+    title: "Supplier product type",
+    description: "Product type options used by supplier products and canvas nodes.",
+    singular: "product type",
+    searchPlaceholder: "Search product type",
   },
 };
 
@@ -242,7 +248,8 @@ function OptionsLoadingTable({ kind }: { kind: WorkspaceOptionKind }) {
 
 export function OrderedOptionSettingsPanel({ kind }: { kind: WorkspaceOptionKind }) {
   const copy = panelCopy[kind];
-  const Icon = kind === "currency" ? Coins : kind === "address-book" ? Mail : MapPin;
+  const Icon =
+    kind === "currency" ? Coins : kind === "address-book" ? Mail : kind === "supplier-product-type" ? Tags : MapPin;
   const query = useWorkspaceOptions(kind);
   const replace = useReplaceWorkspaceOptions(kind);
   const [search, setSearch] = useState("");

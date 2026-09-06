@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-export const workspaceOptionKinds = ["currency", "destination-country", "address-book"] as const;
+export const workspaceOptionKinds = [
+  "currency",
+  "destination-country",
+  "address-book",
+  "supplier-product-type",
+] as const;
 export type WorkspaceOptionKind = (typeof workspaceOptionKinds)[number];
 
 export const workspaceOptionSchema = z.object({
@@ -547,7 +552,7 @@ function supportedCurrencyCodes(): string[] {
 }
 
 export function defaultWorkspaceOptions(kind: WorkspaceOptionKind): WorkspaceOption[] {
-  if (kind === "address-book") return [];
+  if (kind === "address-book" || kind === "supplier-product-type") return [];
   const codes = kind === "currency" ? supportedCurrencyCodes() : [...COUNTRY_CODES];
   return codes.map((code, sortIndex) => ({
     id: `${kind}:${code}`,
