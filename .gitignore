@@ -24,6 +24,9 @@
 .DS_Store
 *.pem
 
+# supabase CLI temp state (project ref, pooler URL, org slug)
+supabase/.temp/
+
 # local Postgres disk uploads
 .data/
 
