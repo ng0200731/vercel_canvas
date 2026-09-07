@@ -24,9 +24,12 @@ Vercel's filesystem is ephemeral. Do not use `.data/uploads`, browser localStora
    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<publishable-or-anon-key>
    SUPABASE_SERVICE_ROLE_KEY=<server-only-service-role-key>
    NEXT_PUBLIC_APP_URL=https://<your-production-domain>
+   XIANGSU_API_KEY=<server-only-key-for-ai-image-generation>
    ```
 
-   Never prefix the service-role key with `NEXT_PUBLIC_`. Do not set `NEXT_PUBLIC_LOCAL_POSTGRES=true` in Vercel.
+   Never prefix the service-role key or `XIANGSU_API_KEY` with `NEXT_PUBLIC_`.
+   Do not set `NEXT_PUBLIC_LOCAL_POSTGRES=true` in Vercel. Without
+   `XIANGSU_API_KEY`, the Generate node returns "AI generation is disabled".
 5. Configure Supabase Auth redirect URLs for the Vercel domain.
 6. Deploy, then test sign-in, canvas persistence, product images, uploads, and generated renders.
 

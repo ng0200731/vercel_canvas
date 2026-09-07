@@ -41,6 +41,7 @@ import {
   normalizeImageGenerationResolution,
   normalizeImageGenerationSize,
 } from "@/lib/image-generation-models";
+import { tryParseJsonResponse } from "@/lib/parse-json-response";
 import { persistGeneratedImage } from "@/lib/upload";
 import { isAbortError } from "@/lib/generation-run";
 import { G2MentionTextarea, type MentionCandidate } from "@/lib/prompt-mention-g2";
@@ -333,13 +334,14 @@ export function G2Node({ id, data, parentId, selected }: NodeProps<G2CanvasNode>
 
       if (!isGenerationRunCurrent(id, run.runId)) return;
 
-      const json: unknown = await res.json();
+      const json: unknown | null = await tryParseJsonResponse(res);
       if (!isGenerationRunCurrent(id, run.runId)) return;
 
       const parsed = imageGenerationResponseSchema.safeParse(json);
-      if (!res.ok || !parsed.success) {
-        const error = imageGenerationErrorSchema.safeParse(json);
-        throw new Error(error.success ? error.data.error : "Generation failed");
+      if (!res.ok || json === null || !parsed.success) {
+        const error = json !== null ? imageGenerationErrorSchema.safeParse(json) : null;
+        const detail = error !== null && error.success ? error.data.error : null;
+        throw new Error(detail ?? `Generation failed (HTTP ${res.status})`);
       }
 
       const finalFormat = isGptModel ? "png" : outputFormat;

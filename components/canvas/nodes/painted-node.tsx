@@ -41,6 +41,7 @@ import {
   normalizeImageGenerationResolution,
   normalizeImageGenerationSize,
 } from "@/lib/image-generation-models";
+import { tryParseJsonResponse } from "@/lib/parse-json-response";
 import { NODE_PORT_COLORS } from "@/lib/nodes/ports";
 import { createMaskFromG2Regions } from "@/lib/nodes/g2";
 import { G2MentionTextarea, type MentionCandidate } from "@/lib/prompt-mention-g2";
@@ -516,13 +517,14 @@ export function PaintedNode({ id, data, parentId, selected }: NodeProps<PaintedC
       });
 
       if (!isGenerationRunCurrent(id, run.runId)) return;
-      const json: unknown = await res.json();
+      const json: unknown | null = await tryParseJsonResponse(res);
       if (!isGenerationRunCurrent(id, run.runId)) return;
 
       const parsed = imageGenerationResponseSchema.safeParse(json);
-      if (!res.ok || !parsed.success) {
-        const error = imageGenerationErrorSchema.safeParse(json);
-        throw new Error(error.success ? error.data.error : "Edit failed");
+      if (!res.ok || json === null || !parsed.success) {
+        const error = json !== null ? imageGenerationErrorSchema.safeParse(json) : null;
+        const detail = error !== null && error.success ? error.data.error : null;
+        throw new Error(detail ?? `Edit failed (HTTP ${res.status})`);
       }
 
       const finalFormat = isGptModel ? "png" : outputFormat;

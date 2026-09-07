@@ -49,6 +49,7 @@ import {
   normalizeImageGenerationModel,
   resolutionForImageGenerationModel,
 } from "@/lib/image-generation-models";
+import { tryParseJsonResponse } from "@/lib/parse-json-response";
 import { isStaleGenerationConfigurationError } from "@/lib/generation-errors";
 import {
   compileGeneratePromptRows,
@@ -1129,12 +1130,13 @@ export function GenerateNode({ id, data, parentId, selected }: NodeProps<Generat
         }),
       });
       if (!isGenerationRunCurrent(id, run.runId)) return;
-      const json: unknown = await res.json();
+      const json: unknown | null = await tryParseJsonResponse(res);
       if (!isGenerationRunCurrent(id, run.runId)) return;
       const parsed = imageGenerationResponseSchema.safeParse(json);
-      if (!res.ok || !parsed.success) {
-        const error = imageGenerationErrorSchema.safeParse(json);
-        throw new Error(error.success ? error.data.error : "Generation failed");
+      if (!res.ok || json === null || !parsed.success) {
+        const error = json !== null ? imageGenerationErrorSchema.safeParse(json) : null;
+        const detail = error !== null && error.success ? error.data.error : null;
+        throw new Error(detail ?? `Generation failed (HTTP ${res.status})`);
       }
       const persisted = await persistGeneratedImage(parsed.data.url, outputFormat, run.signal);
       if (!isGenerationRunCurrent(id, run.runId)) return;
@@ -2071,8 +2073,14 @@ function GenerateLogOverlay({ onClose }: { onClose: () => void }) {
     setLoading(true);
     setError(null);
     fetch("/api/generate-log", { cache: "no-store" })
-      .then((res) => res.json())
-      .then((data: { entries: readonly GenerateLogEntry[] }) => {
+      .then(async (res) => {
+        const data = await tryParseJsonResponse(res);
+        if (!res.ok || data === null) {
+          throw new Error(`Failed to load log (HTTP ${res.status})`);
+        }
+        return data as { entries?: readonly GenerateLogEntry[] };
+      })
+      .then((data) => {
         setEntries(data.entries ?? []);
         setLoading(false);
       })
