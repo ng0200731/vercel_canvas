@@ -30,7 +30,7 @@ import {
   alphaMapFromBuffer,
   compositeAlphaShape,
 } from "@/lib/mask-composite";
-import sharp from "sharp";
+import { loadSharp } from "@/lib/sharp";
 
 const XIANGSU_GENERATION_URL = "https://www.xiangsuai.cn/v1/images/generations";
 const XIANGSU_EDIT_URL = "https://www.xiangsuai.cn/v1/images/edits";
@@ -261,6 +261,7 @@ async function appendEditImages(
 
 async function imageDimensions(blob: Blob): Promise<{ width: number; height: number } | null> {
   try {
+    const sharp = await loadSharp();
     const buffer = Buffer.from(await blob.arrayBuffer());
     const meta = await sharp(buffer).metadata();
     if (meta.width && meta.height) return { width: meta.width, height: meta.height };
@@ -702,6 +703,8 @@ async function runMaskedTextureTransfer(
   const editAuth = env.OPENAI_API_KEY
     ? `Bearer ${env.OPENAI_API_KEY}`
     : `Bearer ${apiKey}`;
+
+  const sharp = await loadSharp();
 
   // Fetch base and mask bytes.
   const baseBlob = await blobFromReferenceUrl(maskCarrier.url, fetcher, signal);

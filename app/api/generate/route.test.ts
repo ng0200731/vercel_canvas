@@ -2,6 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createGeneratePostHandler } from "@/app/api/generate/route";
 
+// Regression guard: `/api/generate` must never require sharp at module-load
+// time (a top-level `import sharp` crashes the route on Vercel where the
+// native binary may be unavailable). If sharp is re-imported eagerly again,
+// the factory below throws and this suite fails on import.
+vi.mock("sharp", () => {
+  throw new Error("sharp must not load at module import time");
+});
+
 function request(body: unknown): Request {
   return new Request("http://localhost/api/generate", {
     method: "POST",
@@ -22,6 +30,16 @@ describe("POST /api/generate", () => {
     await expect(response.json()).resolves.toEqual({
       error: "AI generation is disabled. Set XIANGSU_API_KEY in .env.local.",
     });
+  });
+
+  it("loads and responds without requiring sharp at module import time", async () => {
+    // Sharp is mocked to throw (see top of file). If the route eagerly required
+    // sharp, importing this module would already have failed.
+    const disabled = createGeneratePostHandler({ configured: false, generate: vi.fn() });
+    expect((await disabled(request({ model: "gpt-image-2", prompt: "test" }))).status).toBe(503);
+
+    const enabled = createGeneratePostHandler({ configured: true, generate: vi.fn() });
+    expect((await enabled(request({ model: "gpt-image-2", prompt: "" }))).status).toBe(400);
   });
 
   it("validates supported image models and prompt boundaries", async () => {

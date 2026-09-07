@@ -1,6 +1,6 @@
 import "server-only";
 
-import sharp from "sharp";
+import { loadSharp } from "@/lib/sharp";
 
 export interface MaskBbox {
   /** Bbox coordinate space (the mask PNG's native size). */
@@ -27,6 +27,7 @@ export async function maskBbox(
   width: number,
   height: number,
 ): Promise<MaskBbox | null> {
+  const sharp = await loadSharp();
   // ensureAlpha() before resize so the alpha plane being resampled is the
   // real mask channel 3. kernel: "nearest" preserves the binary 0/255
   // boundary — bilinear would smear it into mid-range values that the
@@ -81,6 +82,7 @@ export async function compositeOutsideBbox(
   bbox: MaskBbox,
   feather = 4,
 ): Promise<Buffer> {
+  const sharp = await loadSharp();
   const baseMeta = await sharp(baseBuffer).metadata();
   const width = baseMeta.width ?? 0;
   const height = baseMeta.height ?? 0;
@@ -160,6 +162,7 @@ export async function compositeMaskedEdit(
   editedBuffer: Buffer,
   maskBuffer: Buffer,
 ): Promise<Buffer> {
+  const sharp = await loadSharp();
   const baseMeta = await sharp(baseBuffer).metadata();
 
   const width = baseMeta.width ?? 0;
@@ -232,6 +235,7 @@ export async function alphaMapFromBuffer(
   width: number,
   height: number,
 ): Promise<AlphaMap> {
+  const sharp = await loadSharp();
   // ensureAlpha() before resize so the alpha plane being resampled is the
   // real mask channel 3. kernel: "nearest" preserves the binary 0/255
   // boundary — the default bilinear resampler would smear it into
@@ -359,6 +363,7 @@ export async function compositeAlphaShape(
   maskBuffer: Buffer,
   options: { feather?: number; dilate?: number } = {},
 ): Promise<Buffer> {
+  const sharp = await loadSharp();
   const feather = Math.max(0, options.feather ?? 3);
   const dilate = Math.max(0, options.dilate ?? 0);
 
@@ -549,6 +554,7 @@ export async function composeMaterialSwatch(
   baseHeight: number,
   options: { swatchSize?: number; margin?: number } = {},
 ): Promise<SwatchResult> {
+  const sharp = await loadSharp();
   // Defaults: ~1/4 of the smaller base dimension, floored at 64px, capped
   // at 1/3 of the smaller dimension so the swatch never dominates the photo.
   const minDim = Math.max(1, Math.min(baseWidth, baseHeight));

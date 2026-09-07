@@ -1,6 +1,6 @@
 import "server-only";
 
-import sharp from "sharp";
+import { loadSharp, type Sharp } from "@/lib/sharp";
 
 import { env } from "@/lib/env";
 import {
@@ -25,10 +25,8 @@ const MAX_PARALLEL_EMBEDS = 2;
 const MAX_WORKING_IMAGE_SIDE = 384;
 
 // libvips can OOM under concurrent decode/extract on large catalogs.
-// Disable cache and keep a single worker so memory stays bounded.
-sharp.cache(false);
-sharp.concurrency(1);
-
+// The cache-disable + single-worker concurrency are applied lazily in
+// `createSharp` below so this module never requires sharp at load time.
 export type SupplierImageMatcher = (
   input: SupplierImageMatchRequest,
   signal?: AbortSignal,
@@ -142,7 +140,17 @@ async function fetchRemoteImage(
   throw new Error("Image redirect limit exceeded.");
 }
 
-function createSharp(sourceBuffer: Buffer) {
+let sharpPromise: Promise<Sharp> | null = null;
+
+async function createSharp(sourceBuffer: Buffer) {
+  if (!sharpPromise) {
+    sharpPromise = loadSharp().then((sharp) => {
+      sharp.cache(false);
+      sharp.concurrency(1);
+      return sharp;
+    });
+  }
+  const sharp = await sharpPromise;
   return sharp(sourceBuffer, {
     animated: false,
     // Guard against pathological inputs; catalog images are product photos.
@@ -161,7 +169,7 @@ export async function embedImageSource(
     ? bufferFromDataUrl(source)
     : await fetchRemoteImage(source, fetcher, signal);
 
-  const { data, info } = await createSharp(sourceBuffer)
+  const { data, info } = await (await createSharp(sourceBuffer))
     .rotate()
     .resize(IMAGE_VECTOR_EMBED_SIZE, IMAGE_VECTOR_EMBED_SIZE, {
       fit: "fill",
@@ -231,7 +239,7 @@ async function embedImageBufferRegion(
   region: ImageCropRegion,
   signal: AbortSignal | undefined,
 ): Promise<ImageRegionVector> {
-  const { data, info } = await createSharp(workingBuffer)
+  const { data, info } = await (await createSharp(workingBuffer))
     .extract({
       left: region.left,
       top: region.top,
@@ -267,7 +275,7 @@ export async function embedImageSourceRegions(
     ? bufferFromDataUrl(source)
     : await fetchRemoteImage(source, fetcher, signal);
 
-  const rotated = createSharp(sourceBuffer).rotate();
+  const rotated = (await createSharp(sourceBuffer)).rotate();
   const metadata = await rotated.metadata();
   const originalWidth = metadata.width;
   const originalHeight = metadata.height;
@@ -279,7 +287,7 @@ export async function embedImageSourceRegions(
   const workHeight = Math.max(1, Math.round(originalHeight * scale));
 
   // Single decode + optional downscale; regions extract from this smaller buffer.
-  const workingBuffer = await createSharp(sourceBuffer)
+  const workingBuffer = await (await createSharp(sourceBuffer))
     .rotate()
     .resize(workWidth, workHeight, {
       fit: "fill",
