@@ -102,6 +102,11 @@ export interface BuildCanvasReportInput {
   filterSupplierId?: string;
 }
 
+function toIso(value: string | Date): string {
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -942,8 +947,8 @@ export function buildCanvasReport(input: BuildCanvasReportInput): CanvasReport {
     canvas: {
       id: input.canvas.id,
       name: input.canvas.name,
-      createdAt: input.canvas.createdAt,
-      updatedAt: input.canvas.updatedAt,
+      createdAt: toIso(input.canvas.createdAt),
+      updatedAt: toIso(input.canvas.updatedAt),
     },
     customerProducts,
     supplierBlocks,
