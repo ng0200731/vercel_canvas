@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { isLocalPostgresConfigured, isSupabaseConfigured } from "@/lib/env";
 import { preferredSmtpProviderSchema } from "@/lib/email/schemas";
-import { createPostgresWorkspaceRecordStore } from "@/lib/store/postgresWorkspaceRecordStore";
+import { getAppSetting, setAppSetting } from "@/lib/store/appSettingStore";
 
 export const runtime = "nodejs";
 
@@ -44,12 +44,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unknown setting key." }, { status: 400 });
   }
 
-  // On the server we always go directly to the Postgres store (the local-DB
-  // backend), never the browser-side remote/local stores. getWorkspaceRecordStore
-  // picks the client store for browser code; here we use the server-side store.
-  const store = createPostgresWorkspaceRecordStore();
   try {
-    const value = await store.getAppSetting(key);
+    const value = await getAppSetting(key);
     return NextResponse.json({ value: value ?? null });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to read setting.";
@@ -91,9 +87,8 @@ export async function POST(request: Request) {
     );
   }
 
-  const store = createPostgresWorkspaceRecordStore();
   try {
-    await store.setAppSetting(key, valueParsed.data);
+    await setAppSetting(key, valueParsed.data);
     return NextResponse.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to save setting.";

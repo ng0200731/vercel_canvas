@@ -3,7 +3,7 @@ import "server-only";
 import nodemailer, { type SendMailOptions } from "nodemailer";
 import { z } from "zod";
 
-import { env, isLocalPostgresConfigured, isSupabaseConfigured } from "@/lib/env";
+import { env } from "@/lib/env";
 import { renderCanvasReportPdf } from "@/lib/email/pdf-report";
 import {
   PREFERRED_SMTP_PROVIDER_SETTING,
@@ -25,7 +25,7 @@ import {
   type SendTestEmailRequest,
   type SmtpProviderId,
 } from "@/lib/email/schemas";
-import { createPostgresWorkspaceRecordStore } from "@/lib/store/postgresWorkspaceRecordStore";
+import { getAppSetting } from "@/lib/store/appSettingStore";
 
 export interface SmtpProviderConfig {
   id: SmtpProviderId;
@@ -505,10 +505,8 @@ export function orderRemoteProviders(
  * warning and returns null so delivery falls back to the default order.
  */
 async function resolvePreferredSmtpProvider(): Promise<PreferredSmtpProvider | null> {
-  if (!isLocalPostgresConfigured && !isSupabaseConfigured) return null;
   try {
-    const store = createPostgresWorkspaceRecordStore();
-    const value = await store.getAppSetting(PREFERRED_SMTP_PROVIDER_SETTING);
+    const value = await getAppSetting(PREFERRED_SMTP_PROVIDER_SETTING);
     if (value == null) return null;
     const parsed = preferredSmtpProviderSchema.safeParse(value);
     if (!parsed.success) {

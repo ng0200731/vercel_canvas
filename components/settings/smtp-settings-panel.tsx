@@ -50,9 +50,9 @@ const providerCards = [
 ] as const;
 
 const preferenceOptions = [
-  { value: "163" as const, label: "Prefer 163.com", hint: "Best for China — tried first." },
-  { value: "gmail" as const, label: "Prefer Gmail", hint: "Best outside China — tried first." },
-  { value: null, label: "Use default order", hint: "163.com first, then Gmail." },
+  { value: "163" as const, label: "163.com", hint: "Preferred when sending from China." },
+  { value: "gmail" as const, label: "Gmail", hint: "Preferred when sending overseas." },
+  { value: null, label: "Auto", hint: "163.com first, then Gmail." },
 ] as const;
 
 const setupSteps = [
@@ -83,8 +83,11 @@ const setupSteps = [
 ] as const;
 
 export function SmtpSettingsPanel() {
+  // Default to Auto (null) so the choice is usable immediately; the stored
+  // value is loaded on mount. Options stay selectable even if the settings API
+  // is unavailable — saving simply reports a clear error in that case.
   const [pref, setPref] = useState<PreferenceState>({
-    status: "loading",
+    status: "ready",
     value: null,
     error: null,
   });
@@ -126,6 +129,9 @@ export function SmtpSettingsPanel() {
 
   async function choosePreference(next: Preference) {
     if (next === pref.value) return;
+    const previous = pref.value;
+    // Reflect the user's choice immediately; persistence is attempted below.
+    setPref((current) => ({ ...current, value: next }));
     setSavingPref(true);
     try {
       const response = await fetch("/api/app-settings", {
@@ -138,11 +144,18 @@ export function SmtpSettingsPanel() {
       setPref({ status: "ready", value: next, error: null });
       toast.success(
         next === null
-          ? "Using default order (163.com, then Gmail)."
-          : `Preferring ${next === "163" ? "163.com" : "Gmail"}.`,
+          ? "Auto: 163.com first, then Gmail."
+          : `Preferred provider set to ${next === "163" ? "163.com" : "Gmail"}.`,
       );
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to save the setting.");
+      // Persistence failed (e.g. no database configured). Revert the selection
+      // so the UI does not silently claim a preference that was not saved.
+      setPref({ status: "unavailable", value: previous, error: null });
+      toast.error(
+        error instanceof Error
+          ? `${error.message} Your choice was not saved.`
+          : "Unable to save the setting.",
+      );
     } finally {
       setSavingPref(false);
     }
@@ -187,7 +200,7 @@ export function SmtpSettingsPanel() {
             <span className="text-muted-foreground inline-flex items-center gap-2 text-xs">
               <Mail className="size-3.5" />
               {pref.value === null
-                ? "Default order: 163.com then Gmail"
+                ? "Auto: 163.com then Gmail"
                 : `Preferred: ${pref.value === "163" ? "163.com" : "Gmail"}`}
             </span>
           ) : null
@@ -196,11 +209,12 @@ export function SmtpSettingsPanel() {
 
       {isUnavailable ? (
         <div className="border-destructive/40 bg-destructive/5 rounded-lg border p-4 text-sm">
-          <p className="font-medium">Database-backed provider preference is unavailable.</p>
+          <p className="font-medium">Saved provider preference is unavailable right now.</p>
           <p className="text-muted-foreground mt-1 leading-6">
             {pref.error ??
-              "Configure Supabase or local Postgres to choose the preferred provider here."}{" "}
-            For now the order is fixed by environment variables: 163.com first, then Gmail.
+              "Configure Supabase or local Postgres to persist your choice here."}{" "}
+            The default is <strong>Auto</strong> (163.com first, then Gmail). Without a database,
+            your selection is not saved, so sending keeps using the default order.
           </p>
         </div>
       ) : null}
@@ -219,7 +233,7 @@ export function SmtpSettingsPanel() {
           </div>
         </div>
 
-        <fieldset disabled={pref.status === "loading" || isUnavailable || savingPref}>
+        <fieldset disabled={savingPref}>
           <legend className="sr-only">Preferred SMTP provider</legend>
           <div className="mt-5 grid gap-3 sm:grid-cols-3">
             {preferenceOptions.map((option) => {

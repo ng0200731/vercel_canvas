@@ -8,6 +8,7 @@ export type SmtpProviderId = z.infer<typeof smtpProviderIdSchema>;
 // Mirrors the app_settings mechanism used by gemini-match-min-cosine. Only the
 // provider id is stored — never credentials.
 export const PREFERRED_SMTP_PROVIDER_SETTING = "preferred-smtp-provider";
+export const PREFERRED_SMTP_PROVIDER_COOKIE = "preferred-smtp-provider";
 // Remote-only: the user chooses between 163.com and Gmail. Local SMTP always
 // takes precedence regardless of this preference.
 export const preferredSmtpProviderSchema = z.enum(["163", "gmail"]).nullable();
