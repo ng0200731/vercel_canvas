@@ -49,8 +49,10 @@ const genericNodeDefinitionRecordSchema = z
     imageUrl: z.string().trim().min(1).optional(),
     storagePath: z.string().trim().min(1).nullable().optional(),
     sortIndex: z.number().int().min(0),
-    createdAt: z.string().datetime(),
-    updatedAt: z.string().datetime(),
+    // PostgREST serializes timestamptz with a numeric offset (e.g. "+00:00"),
+    // while the local store uses an ISO "Z" suffix. Accept both.
+    createdAt: z.string().datetime({ offset: true }),
+    updatedAt: z.string().datetime({ offset: true }),
   })
   .superRefine((value, context) => {
     if (!value.images?.length && !value.imageUrl) {
