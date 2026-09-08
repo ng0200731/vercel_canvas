@@ -252,6 +252,11 @@ export function GenericNodeSettingsPanel() {
       ) : query.isError ? (
         <div className="border-destructive/30 bg-destructive/5 flex min-h-48 flex-col items-center justify-center gap-3 rounded-lg border p-6 text-center">
           <p className="text-destructive text-sm font-medium">Unable to load generic nodes.</p>
+          {query.error ? (
+            <p className="text-destructive/80 max-w-md text-xs">
+              {query.error.message}
+            </p>
+          ) : null}
           <Button type="button" variant="outline" onClick={() => void query.refetch()}>
             <RefreshCw /> Retry
           </Button>

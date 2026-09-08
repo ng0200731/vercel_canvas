@@ -65,6 +65,7 @@ export function NodePalette({
   genericNodeDefinitions,
   genericNodeDefinitionsLoading,
   genericNodeDefinitionsError,
+  genericNodeDefinitionsErrorMessage,
   onAddGenericNode,
 }: {
   nodes: CanvasNode[];
@@ -72,6 +73,7 @@ export function NodePalette({
   genericNodeDefinitions: readonly GenericNodeDefinition[];
   genericNodeDefinitionsLoading: boolean;
   genericNodeDefinitionsError: boolean;
+  genericNodeDefinitionsErrorMessage?: string | null;
   onAddGenericNode: (definition: GenericNodeDefinition) => void;
 }) {
   const { leaveGroupNode } = useCanvasActions();
@@ -115,7 +117,12 @@ export function NodePalette({
             <div className="bg-muted h-9 animate-pulse rounded-md" />
           </div>
         ) : genericNodeDefinitionsError ? (
-          <p className="text-destructive px-1 py-2 text-xs">Unable to load generic nodes.</p>
+          <div className="text-destructive grid gap-1 px-1 py-2 text-xs">
+            <p>Unable to load generic nodes.</p>
+            {genericNodeDefinitionsErrorMessage ? (
+              <p className="text-destructive/80">{genericNodeDefinitionsErrorMessage}</p>
+            ) : null}
+          </div>
         ) : genericNodeDefinitions.length === 0 ? (
           <p className="text-muted-foreground px-1 py-2 text-xs">No generic nodes.</p>
         ) : (

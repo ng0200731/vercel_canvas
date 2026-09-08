@@ -2497,6 +2497,11 @@ function Editor({
             genericNodeDefinitions={genericNodeDefinitions}
             genericNodeDefinitionsLoading={genericNodeDefinitionsQuery.isLoading}
             genericNodeDefinitionsError={genericNodeDefinitionsQuery.isError}
+            genericNodeDefinitionsErrorMessage={
+              genericNodeDefinitionsQuery.error instanceof Error
+                ? genericNodeDefinitionsQuery.error.message
+                : null
+            }
             onAddGenericNode={addGenericNodeAtCenter}
           />
           <ReferenceHoverContext.Provider value={referenceHover}>
