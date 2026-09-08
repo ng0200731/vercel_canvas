@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { isLocalPostgresConfigured, isSupabaseConfigured } from "@/lib/env";
+import { preferredSmtpProviderSchema } from "@/lib/email/schemas";
 import { createPostgresWorkspaceRecordStore } from "@/lib/store/postgresWorkspaceRecordStore";
 
 export const runtime = "nodejs";
@@ -14,7 +15,8 @@ export const runtime = "nodejs";
 // single source of truth for what the UI may persist.
 const SETTING_SCHEMAS = {
   "gemini-match-min-cosine": z.number().min(-1).max(1),
-} satisfies Record<string, z.ZodNumber>;
+  "preferred-smtp-provider": preferredSmtpProviderSchema,
+} satisfies Record<string, z.ZodType>;
 
 const allowedKeys = new Set(Object.keys(SETTING_SCHEMAS));
 

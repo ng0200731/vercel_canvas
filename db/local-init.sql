@@ -343,7 +343,7 @@ CREATE TABLE IF NOT EXISTS public.app_settings (
   value      jsonb NOT NULL,
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, key),
-  CHECK (key IN ('gemini-match-min-cosine'))
+  CHECK (key IN ('gemini-match-min-cosine', 'preferred-smtp-provider'))
 );
 
 

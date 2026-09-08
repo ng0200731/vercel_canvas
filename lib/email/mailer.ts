@@ -3,10 +3,12 @@ import "server-only";
 import nodemailer, { type SendMailOptions } from "nodemailer";
 import { z } from "zod";
 
-import { env } from "@/lib/env";
+import { env, isLocalPostgresConfigured, isSupabaseConfigured } from "@/lib/env";
 import { renderCanvasReportPdf } from "@/lib/email/pdf-report";
 import {
+  PREFERRED_SMTP_PROVIDER_SETTING,
   emailDeliveryResponseSchema,
+  preferredSmtpProviderSchema,
   sendCanvasEmailRequestSchema,
   sendCanvasReportEmailRequestSchema,
   sendPurchaseSamplingEmailRequestSchema,
@@ -14,6 +16,7 @@ import {
   sendReminderEmailRequestSchema,
   sendTestEmailRequestSchema,
   type EmailDeliveryResponse,
+  type PreferredSmtpProvider,
   type SendCanvasEmailRequest,
   type SendCanvasReportEmailRequest,
   type SendPurchaseSamplingEmailRequest,
@@ -22,6 +25,7 @@ import {
   type SendTestEmailRequest,
   type SmtpProviderId,
 } from "@/lib/email/schemas";
+import { createPostgresWorkspaceRecordStore } from "@/lib/store/postgresWorkspaceRecordStore";
 
 export interface SmtpProviderConfig {
   id: SmtpProviderId;
@@ -478,21 +482,72 @@ export function createEmailDelivery({ providers, createTransport }: EmailDeliver
   };
 }
 
-function delivery() {
+/**
+ * Puts the operator's preferred remote provider first while keeping the other
+ * configured remote provider as fallback. Pure and exported for unit tests.
+ * - No preference → the given order is returned unchanged (163 then Gmail).
+ * - Unconfigured/invalid preference → ignored, order unchanged.
+ */
+export function orderRemoteProviders(
+  configured: readonly SmtpProviderConfig[],
+  preferred: PreferredSmtpProvider | null,
+): SmtpProviderConfig[] {
+  if (!preferred) return [...configured];
+  const rest = configured.filter((provider) => provider.id !== preferred);
+  const preferredProvider = configured.find((provider) => provider.id === preferred);
+  if (!preferredProvider) return [...configured];
+  return [preferredProvider, ...rest];
+}
+
+/**
+ * Reads the saved preferred remote SMTP provider from app_settings. Never
+ * throws: on any failure (no DB, demo mode, read error) it logs a non-sensitive
+ * warning and returns null so delivery falls back to the default order.
+ */
+async function resolvePreferredSmtpProvider(): Promise<PreferredSmtpProvider | null> {
+  if (!isLocalPostgresConfigured && !isSupabaseConfigured) return null;
+  try {
+    const store = createPostgresWorkspaceRecordStore();
+    const value = await store.getAppSetting(PREFERRED_SMTP_PROVIDER_SETTING);
+    if (value == null) return null;
+    const parsed = preferredSmtpProviderSchema.safeParse(value);
+    if (!parsed.success) {
+      console.warn("Ignoring invalid preferred SMTP provider setting.", {
+        storedType: typeof value,
+      });
+      return null;
+    }
+    return parsed.data;
+  } catch (error) {
+    console.warn("Could not read preferred SMTP provider; using default order.", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+      errorMessage: error instanceof Error ? error.message : "Unknown error",
+    });
+    return null;
+  }
+}
+
+async function delivery() {
+  const preferred = await resolvePreferredSmtpProvider();
   return createEmailDelivery({
-    providers: [...configuredLocalProvider(), ...configuredProviders()],
+    providers: [
+      ...configuredLocalProvider(),
+      ...orderRemoteProviders(configuredProviders(), preferred),
+    ],
     createTransport: createNodemailerTransport,
   });
 }
 
 export async function deliverCanvasEmail(input: SendCanvasEmailRequest) {
   const parsed = sendCanvasEmailRequestSchema.parse(input);
-  return delivery()(parsed.to, prepareCanvasMail(parsed));
+  return (await delivery())(parsed.to, prepareCanvasMail(parsed));
 }
 
 export async function deliverCanvasReportEmail(input: SendCanvasReportEmailRequest) {
   const parsed = sendCanvasReportEmailRequestSchema.parse(input);
-  return delivery()(
+  return (
+    await delivery()
+  )(
     parsed.to,
     await prepareCanvasReportMail(parsed, renderCanvasReportPdf, { requirePdf: false }),
     parsed.cc ?? [],
@@ -501,20 +556,20 @@ export async function deliverCanvasReportEmail(input: SendCanvasReportEmailReque
 
 export async function deliverTestEmail(input: SendTestEmailRequest) {
   const parsed = sendTestEmailRequestSchema.parse(input);
-  return delivery()(parsed.to, prepareTestMail());
+  return (await delivery())(parsed.to, prepareTestMail());
 }
 
 export async function deliverPurchaseSamplingEmail(input: SendPurchaseSamplingEmailRequest) {
   const parsed = sendPurchaseSamplingEmailRequestSchema.parse(input);
   const mail = await preparePurchaseSamplingMail(parsed);
-  return delivery()(parsed.to, mail);
+  return (await delivery())(parsed.to, mail);
 }
 
 export async function deliverPhysicalSampleApprovalEmail(
   input: SendPhysicalSampleApprovalEmailRequest,
 ) {
   const parsed = sendPhysicalSampleApprovalEmailRequestSchema.parse(input);
-  return delivery()(parsed.to, preparePhysicalSampleApprovalMail(parsed));
+  return (await delivery())(parsed.to, preparePhysicalSampleApprovalMail(parsed));
 }
 
 export function prepareReminderMail(input: SendReminderEmailRequest): PreparedMail {
@@ -541,5 +596,5 @@ export function prepareReminderMail(input: SendReminderEmailRequest): PreparedMa
 
 export async function deliverReminderEmail(input: SendReminderEmailRequest) {
   const parsed = sendReminderEmailRequestSchema.parse(input);
-  return delivery()(parsed.to, prepareReminderMail(parsed));
+  return (await delivery())(parsed.to, prepareReminderMail(parsed));
 }

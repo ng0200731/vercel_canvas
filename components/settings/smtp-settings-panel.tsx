@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Loader2, Mail, Send, Server, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
@@ -12,7 +12,17 @@ import { emailRecipientSchema } from "@/lib/email/schemas";
 
 import { SettingsPanelHeader } from "./settings-panel-header";
 
-const providers = [
+const SETTING_KEY = "preferred-smtp-provider";
+
+type Preference = "163" | "gmail" | null;
+
+interface PreferenceState {
+  status: "loading" | "ready" | "unavailable";
+  value: Preference;
+  error: string | null;
+}
+
+const providerCards = [
   {
     label: "Optional override",
     name: "Local catcher",
@@ -22,7 +32,7 @@ const providers = [
     password: "SMTP_LOCAL_PASSWORD",
   },
   {
-    label: "Primary",
+    label: "Preferred",
     name: "163.com",
     server: "smtp.163.com",
     port: "465 / SSL",
@@ -30,13 +40,19 @@ const providers = [
     password: "SMTP_163_PASSWORD",
   },
   {
-    label: "Backup",
+    label: "Fallback",
     name: "Gmail",
     server: "smtp.gmail.com",
     port: "587 / STARTTLS",
     username: "SMTP_GMAIL_USERNAME",
     password: "SMTP_GMAIL_PASSWORD",
   },
+] as const;
+
+const preferenceOptions = [
+  { value: "163" as const, label: "Prefer 163.com", hint: "Best for China — tried first." },
+  { value: "gmail" as const, label: "Prefer Gmail", hint: "Best outside China — tried first." },
+  { value: null, label: "Use default order", hint: "163.com first, then Gmail." },
 ] as const;
 
 const setupSteps = [
@@ -49,7 +65,7 @@ const setupSteps = [
     ],
   },
   {
-    name: "163.com (primary)",
+    name: "163.com",
     steps: [
       "Sign in to mail.163.com, open Settings, then enable the SMTP service under POP3/SMTP/IMAP.",
       "Generate an authorization password. Do not use the normal 163.com account password.",
@@ -57,18 +73,80 @@ const setupSteps = [
     ],
   },
   {
-    name: "Gmail (backup)",
+    name: "Gmail",
     steps: [
       "Enable 2-Step Verification on the Google account, then create an App Password for Mail.",
       "Set SMTP_GMAIL_USERNAME to the complete Gmail address and SMTP_GMAIL_PASSWORD to the 16-character App Password.",
-      "Gmail uses required STARTTLS on port 587 and is attempted only if 163.com cannot deliver.",
+      "Gmail uses required STARTTLS on port 587.",
     ],
   },
 ] as const;
 
 export function SmtpSettingsPanel() {
+  const [pref, setPref] = useState<PreferenceState>({
+    status: "loading",
+    value: null,
+    error: null,
+  });
+  const [savingPref, setSavingPref] = useState(false);
   const [recipient, setRecipient] = useState("");
   const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch(`/api/app-settings?key=${SETTING_KEY}`);
+        if (response.status === 503) {
+          if (cancelled) return;
+          setPref({ status: "unavailable", value: null, error: null });
+          return;
+        }
+        const payload = (await response.json()) as { value?: "163" | "gmail" | null; error?: string };
+        if (cancelled) return;
+        if (!response.ok) {
+          setPref({
+            status: "unavailable",
+            value: null,
+            error: payload.error ?? "Failed to load the current setting.",
+          });
+          return;
+        }
+        const stored = payload.value === "163" || payload.value === "gmail" ? payload.value : null;
+        setPref({ status: "ready", value: stored, error: null });
+      } catch {
+        if (cancelled) return;
+        setPref({ status: "unavailable", value: null, error: "Unable to reach the settings API." });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function choosePreference(next: Preference) {
+    if (next === pref.value) return;
+    setSavingPref(true);
+    try {
+      const response = await fetch("/api/app-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: SETTING_KEY, value: next }),
+      });
+      const payload = (await response.json()) as { ok?: boolean; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Failed to save the setting.");
+      setPref({ status: "ready", value: next, error: null });
+      toast.success(
+        next === null
+          ? "Using default order (163.com, then Gmail)."
+          : `Preferring ${next === "163" ? "163.com" : "Gmail"}.`,
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to save the setting.");
+    } finally {
+      setSavingPref(false);
+    }
+  }
 
   async function handleTest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -97,16 +175,91 @@ export function SmtpSettingsPanel() {
     }
   }
 
+  const isUnavailable = pref.status === "unavailable";
+
   return (
     <section className="mx-auto grid w-full max-w-5xl gap-6">
       <SettingsPanelHeader
         title="SMTP delivery"
-        description="Send a real test message using 163.com first and Gmail as fallback. An optional local SMTP catcher can override real delivery."
+        description="Choose which remote provider is tried first. The chosen provider is attempted first; if it fails, the other configured remote provider is used automatically. An optional local SMTP catcher always overrides remote delivery."
+        action={
+          pref.status === "ready" ? (
+            <span className="text-muted-foreground inline-flex items-center gap-2 text-xs">
+              <Mail className="size-3.5" />
+              {pref.value === null
+                ? "Default order: 163.com then Gmail"
+                : `Preferred: ${pref.value === "163" ? "163.com" : "Gmail"}`}
+            </span>
+          ) : null
+        }
       />
+
+      {isUnavailable ? (
+        <div className="border-destructive/40 bg-destructive/5 rounded-lg border p-4 text-sm">
+          <p className="font-medium">Database-backed provider preference is unavailable.</p>
+          <p className="text-muted-foreground mt-1 leading-6">
+            {pref.error ??
+              "Configure Supabase or local Postgres to choose the preferred provider here."}{" "}
+            For now the order is fixed by environment variables: 163.com first, then Gmail.
+          </p>
+        </div>
+      ) : null}
+
+      <form className="rounded-lg border p-5">
+        <div className="flex items-start gap-3">
+          <span className="bg-secondary text-secondary-foreground grid size-9 shrink-0 place-items-center rounded-md">
+            <Mail className="size-4" />
+          </span>
+          <div>
+            <h3 className="font-semibold">Preferred remote provider</h3>
+            <p className="text-muted-foreground mt-1 text-sm leading-6">
+              The other configured provider remains the automatic fallback. Local SMTP, when set,
+              always takes precedence over this choice.
+            </p>
+          </div>
+        </div>
+
+        <fieldset disabled={pref.status === "loading" || isUnavailable || savingPref}>
+          <legend className="sr-only">Preferred SMTP provider</legend>
+          <div className="mt-5 grid gap-3 sm:grid-cols-3">
+            {preferenceOptions.map((option) => {
+              const checked = pref.value === option.value;
+              return (
+                <label
+                  key={option.label}
+                  className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors ${
+                    checked ? "border-primary bg-primary/5" : "hover:bg-muted/50"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="preferred-smtp-provider"
+                    value={option.value ?? ""}
+                    checked={checked}
+                    onChange={() => void choosePreference(option.value)}
+                    className="mt-0.5 size-4 shrink-0 accent-primary"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium">{option.label}</span>
+                    <span className="text-muted-foreground block text-xs leading-5">
+                      {option.hint}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          {savingPref ? (
+            <p className="text-muted-foreground mt-3 inline-flex items-center gap-2 text-xs">
+              <Loader2 className="size-3.5 animate-spin" /> Saving…
+            </p>
+          ) : null}
+        </fieldset>
+      </form>
 
       <div className="overflow-hidden rounded-lg border">
         <div className="bg-muted/40 grid gap-px md:grid-cols-3">
-          {providers.map((provider) => (
+          {providerCards.map((provider) => (
             <article key={provider.name} className="bg-background p-5">
               <div className="mb-4 flex items-center gap-3">
                 <span className="bg-secondary text-secondary-foreground grid size-9 place-items-center rounded-md">
@@ -152,8 +305,8 @@ export function SmtpSettingsPanel() {
           <div>
             <h3 className="font-semibold">Send a test email</h3>
             <p className="text-muted-foreground mt-1 text-sm leading-6">
-              This performs a real SMTP delivery using the same primary and backup flow as Canvas
-              Send.
+              Performs a real SMTP delivery using the same preferred-provider-with-fallback flow as
+              Canvas Send.
             </p>
           </div>
         </div>
@@ -195,9 +348,10 @@ export function SmtpSettingsPanel() {
         <ShieldCheck className="text-primary mt-0.5 size-4 shrink-0" />
         <div>
           <p>
-            In Vercel, open Project Settings → Environment Variables, add one complete credential
-            pair, and redeploy. Add local SMTP variables only for a local catcher, and add both
-            remote pairs to enable 163.com-to-Gmail fallback. You may also set{" "}
+            In Vercel, open Project Settings → Environment Variables, add at least one complete
+            credential pair (163.com and/or Gmail), and redeploy. The preferred-provider choice here
+            only reorders those configured providers — it does not change credentials. Set local
+            SMTP variables only for a local catcher. You may also set{" "}
             <span className="font-mono text-xs">SMTP_FROM_NAME</span> for the sender display name.
           </p>
           <p className="mt-2">

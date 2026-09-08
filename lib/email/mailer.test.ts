@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createEmailDelivery,
+  orderRemoteProviders,
   prepareCanvasMail,
   prepareCanvasReportMail,
   prepareCanvasReportHtmlOnlyMail,
@@ -41,6 +42,37 @@ const mail = {
   html: "<p>Test</p>",
   attachments: [],
 };
+
+describe("orderRemoteProviders", () => {
+  it("keeps 163-then-Gmail order when no preference is set", () => {
+    expect(orderRemoteProviders([primary, backup], null).map((p) => p.id)).toEqual(["163", "gmail"]);
+  });
+
+  it("puts 163 first when it is preferred", () => {
+    expect(orderRemoteProviders([primary, backup], "163").map((p) => p.id)).toEqual([
+      "163",
+      "gmail",
+    ]);
+  });
+
+  it("puts Gmail first when it is preferred, keeping 163 as fallback", () => {
+    expect(orderRemoteProviders([primary, backup], "gmail").map((p) => p.id)).toEqual([
+      "gmail",
+      "163",
+    ]);
+  });
+
+  it("is a no-op when the preferred provider is not configured", () => {
+    expect(orderRemoteProviders([backup], "163").map((p) => p.id)).toEqual(["gmail"]);
+  });
+
+  it("does not mutate the input array", () => {
+    const input = [primary, backup];
+    const output = orderRemoteProviders(input, "gmail");
+    expect(input.map((p) => p.id)).toEqual(["163", "gmail"]);
+    expect(output).not.toBe(input);
+  });
+});
 
 describe("SMTP email delivery", () => {
   it("sends with the primary provider and validates the SMTP response", async () => {
