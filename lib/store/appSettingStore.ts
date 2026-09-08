@@ -47,7 +47,20 @@ async function getAppSettingFromDb(key: string): Promise<unknown | null> {
 
 async function setAppSettingToDb(key: string, value: unknown): Promise<void> {
   if (isSupabaseConfigured) {
-    const { error } = await getSupabaseServiceClient().from("app_settings").upsert(
+    const client = getSupabaseServiceClient();
+    // "Auto" means unset: delete the row rather than writing SQL NULL, which
+    // violates app_settings.value NOT NULL and would silently keep a stale
+    // preference (e.g. an old Gmail choice) for the mailer to read back.
+    if (value === null) {
+      const { error } = await client
+        .from("app_settings")
+        .delete()
+        .eq("user_id", localUserId)
+        .eq("key", key);
+      if (error) throw new Error(`Failed to clear application setting: ${error.message}`);
+      return;
+    }
+    const { error } = await client.from("app_settings").upsert(
       {
         user_id: localUserId,
         key,
