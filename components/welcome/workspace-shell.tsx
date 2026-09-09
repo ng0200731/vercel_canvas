@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ComponentType, type ReactNode } from "react";
+import { useMemo, useState, type ComponentType, type ReactNode } from "react";
 import {
   Boxes,
   ChevronDown,
@@ -24,6 +24,7 @@ import { GenericNodeSettingsPanel } from "@/components/settings/generic-node-set
 import { GeminiSearchSettingsPanel } from "@/components/settings/gemini-search-settings-panel";
 import { OrderedOptionSettingsPanel } from "@/components/settings/ordered-option-settings-panel";
 import { SmtpSettingsPanel } from "@/components/settings/smtp-settings-panel";
+import { UserManagementPanel } from "@/components/settings/user-management-panel";
 import { EntityWorkspacePanel } from "@/components/welcome/entity-workspace-panel";
 import { SampleStatusDashboard } from "@/components/sample-status/sample-status-dashboard";
 import { cn } from "@/lib/utils";
@@ -40,7 +41,8 @@ type TabId =
   | "destination-country-settings"
   | "address-book-settings"
   | "generic-node-settings"
-  | "gemini-settings";
+  | "gemini-settings"
+  | "users";
 type WorkspaceMode = "new" | "records";
 
 interface MenuItem {
@@ -119,6 +121,7 @@ const sections: MenuSection[] = [
       { label: "Address book", tab: "address-book-settings" },
       { label: "Generic node", tab: "generic-node-settings" },
       { label: "Gemini image search", tab: "gemini-settings" },
+      { label: "User", tab: "users" },
     ],
   },
 ];
@@ -135,6 +138,7 @@ const tabLabels: Record<TabId, string> = {
   "address-book-settings": "Address Book",
   "generic-node-settings": "Generic Node",
   "gemini-settings": "Gemini Image Search",
+  users: "User",
 };
 
 function sectionForTab(tabId: TabId): SectionId {
@@ -258,6 +262,7 @@ function renderTabContent({
   if (tabId === "address-book-settings") return <OrderedOptionSettingsPanel kind="address-book" />;
   if (tabId === "generic-node-settings") return <GenericNodeSettingsPanel />;
   if (tabId === "gemini-settings") return <GeminiSearchSettingsPanel />;
+  if (tabId === "users") return <UserManagementPanel />;
   if (tabId === "customer")
     return (
       <EntityWorkspacePanel
@@ -289,9 +294,11 @@ function renderTabContent({
 export function WorkspaceShell({
   isSupabaseConfigured,
   isImageGenerationConfigured,
+  isAdmin,
 }: {
   isSupabaseConfigured: boolean;
   isImageGenerationConfigured: boolean;
+  isAdmin?: boolean;
 }) {
   const [expanded, setExpanded] = useState<SectionId | null>(null);
   const [activeSection, setActiveSection] = useState<SectionId | null>(null);
@@ -302,6 +309,16 @@ export function WorkspaceShell({
   const [isMenuCollapsed, setIsMenuCollapsed] = useState(false);
   const [entityMode, setEntityMode] = useState<WorkspaceMode>("new");
   const [entityFormVersion, setEntityFormVersion] = useState(0);
+
+  // The "User" management item is admin-only.
+  const visibleSections = useMemo(() => {
+    if (isAdmin) return sections;
+    return sections.map((section) =>
+      section.id === "settings"
+        ? { ...section, items: section.items.filter((item) => item.tab !== "users") }
+        : section,
+    );
+  }, [isAdmin]);
 
   function syncMenuToTab(tabId: TabId) {
     const sectionId = sectionForTab(tabId);
@@ -415,7 +432,7 @@ export function WorkspaceShell({
         </div>
 
         <nav aria-label="Main menu" className="flex flex-col gap-1">
-          {sections.map((section) => {
+          {visibleSections.map((section) => {
             const Icon = section.icon;
             const isExpanded = expanded === section.id;
             const isActive = activeSection === section.id;

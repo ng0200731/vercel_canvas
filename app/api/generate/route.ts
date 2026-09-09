@@ -8,21 +8,38 @@ import {
   type XiangsuGenerateOutput,
 } from "@/lib/xiangsu";
 import { writeGenerateLog } from "@/lib/generate-log-store";
+import {
+  authorizeGeneration,
+  consumeSuccessfulGeneration,
+  type GenerationGuardResult,
+} from "@/lib/generation-usage";
 
 export const runtime = "nodejs";
 
 interface GenerateRouteDependencies {
   configured: boolean;
   generate: (input: XiangsuGenerateInput, signal?: AbortSignal) => Promise<XiangsuGenerateOutput>;
+  guard?: () => Promise<GenerationGuardResult>;
 }
 
-export function createGeneratePostHandler({ configured, generate }: GenerateRouteDependencies) {
+export function createGeneratePostHandler({ configured, generate, guard }: GenerateRouteDependencies) {
   return async function POST(request: Request) {
     if (!configured) {
       return NextResponse.json(
         { error: "AI generation is disabled. Set XIANGSU_API_KEY in .env.local." },
         { status: 503 },
       );
+    }
+
+    let guardResult: GenerationGuardResult | null = null;
+    if (guard) {
+      guardResult = await guard();
+      if (!guardResult.ok) {
+        return NextResponse.json(
+          { error: guardResult.error, remaining: guardResult.remaining ?? 0 },
+          { status: guardResult.status },
+        );
+      }
     }
 
     let json: unknown;
@@ -43,6 +60,22 @@ export function createGeneratePostHandler({ configured, generate }: GenerateRout
     try {
       const startedAt = Date.now();
       const result = await generate(parsed.data, request.signal);
+      if (guardResult?.ok && !guardResult.isAdmin) {
+        const consumed = await consumeSuccessfulGeneration({
+          userId: guardResult.userId,
+          model: result.model,
+          prompt: parsed.data.prompt,
+          size: parsed.data.size,
+          outputUrl: result.url,
+        });
+        if (!consumed.allowed) {
+          writeGenerateLog({ ok: false, request: parsed.data, error: "Generation allowance used up." });
+          return NextResponse.json(
+            { error: "Your lifetime generation allowance has been used up.", remaining: consumed.remaining },
+            { status: 429 },
+          );
+        }
+      }
       writeGenerateLog({
         ok: true,
         request: parsed.data,
@@ -69,6 +102,7 @@ export function createGeneratePostHandler({ configured, generate }: GenerateRout
 
 export const POST = createGeneratePostHandler({
   configured: isXiangsuConfigured || isOpenAiConfigured,
+  guard: authorizeGeneration,
   generate: (input, signal) =>
     generateXiangsuImage(
       {

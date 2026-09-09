@@ -5,7 +5,15 @@ import { Layers3 } from "lucide-react";
 import { signOut } from "@/app/(app)/actions";
 import { Button } from "@/components/ui/button";
 
-export function AppHeader({ email, authEnabled }: { email: string | null; authEnabled: boolean }) {
+export function AppHeader({
+  email,
+  isAdmin,
+  authEnabled,
+}: {
+  email: string | null;
+  isAdmin?: boolean;
+  authEnabled: boolean;
+}) {
   return (
     <header className="bg-background/90 supports-[backdrop-filter]:bg-background/75 sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between border-b px-4 backdrop-blur">
       <span className="inline-flex h-10 items-center gap-2 px-2 text-sm font-semibold tracking-tight">
@@ -17,6 +25,11 @@ export function AppHeader({ email, authEnabled }: { email: string | null; authEn
       <div className="flex items-center gap-3">
         {authEnabled && email ? (
           <>
+            {isAdmin ? (
+              <span className="bg-primary/10 text-primary rounded-full px-2 py-0.5 text-[11px] font-semibold">
+                Admin
+              </span>
+            ) : null}
             <span className="text-muted-foreground hidden text-xs sm:inline">{email}</span>
             <form action={signOut}>
               <Button size="sm" variant="ghost" type="submit">
