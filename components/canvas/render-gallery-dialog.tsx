@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Copy, Download, Images, LoaderCircle } from "lucide-react";
+import { Copy, Images, LoaderCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { ImagePreviewDialog } from "@/components/image-preview-dialog";
+import { ImageDownloadButton } from "@/components/image-download-button";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -16,7 +17,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { downloadImageFile } from "@/lib/download-image";
 import {
   getModelDisplayName,
   imageGenerationModelIdSchema,
@@ -113,7 +113,6 @@ export function RenderGalleryDialog({ canvasId }: RenderGalleryDialogProps) {
   const [images, setImages] = useState<ImageRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [dimensions, setDimensions] = useState<Record<string, ImageDimensions>>({});
   const previewItems = images.map((image) => ({
     src: image.url,
@@ -131,21 +130,6 @@ export function RenderGalleryDialog({ canvasId }: RenderGalleryDialogProps) {
       setError(reason instanceof Error ? reason.message : "Failed to load renders");
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function handleDownload(image: ImageRecord) {
-    setDownloadingId(image.id);
-    try {
-      await downloadImageFile({
-        url: image.url,
-        baseName: `render-${image.createdAt.replaceAll(":", "-")}`,
-        outputFormat: image.modelDetails?.outputFormat,
-      });
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to download render.");
-    } finally {
-      setDownloadingId(null);
     }
   }
 
@@ -230,22 +214,13 @@ export function RenderGalleryDialog({ canvasId }: RenderGalleryDialogProps) {
                         </button>
                       }
                     />
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant="secondary"
-                      className="absolute right-2 bottom-2 shadow-md"
-                      aria-label="Download rendered image"
+                    <ImageDownloadButton
+                      url={image.url}
+                      baseName={`render-${image.createdAt.replaceAll(":", "-")}`}
                       title="Download rendered image"
-                      disabled={downloadingId === image.id}
-                      onClick={() => void handleDownload(image)}
-                    >
-                      {downloadingId === image.id ? (
-                        <LoaderCircle className="animate-spin" />
-                      ) : (
-                        <Download />
-                      )}
-                    </Button>
+                      ariaLabel="Download rendered image"
+                      className="absolute right-2 bottom-2 shadow-md"
+                    />
                   </div>
                   <div className="flex min-h-32 flex-col gap-2 p-3">
                     <div className="flex flex-wrap gap-1">

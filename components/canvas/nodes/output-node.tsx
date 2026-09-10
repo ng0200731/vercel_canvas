@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { type NodeProps } from "@xyflow/react";
 import { Download, ImageIcon, Link2, Loader2, Square } from "lucide-react";
 import { toast } from "sonner";
 
 import { ImagePreviewDialog } from "@/components/image-preview-dialog";
+import { ImageDownloadButton } from "@/components/image-download-button";
 import { Button } from "@/components/ui/button";
-import { downloadImageFile } from "@/lib/download-image";
 import { isStaleGenerationConfigurationError } from "@/lib/generation-errors";
 import { cn } from "@/lib/utils";
 import { NODE_PORT_COLORS } from "@/lib/nodes/ports";
@@ -39,7 +39,6 @@ function formatCreatedAt(value?: string): string | null {
 
 export function OutputNode({ id, data, parentId, selected }: NodeProps<OutputCanvasNode>) {
   const { cancelGenerationRun, updateNodeData } = useCanvasActions();
-  const [downloading, setDownloading] = useState(false);
   const highlight = useConnectionHighlight(id);
   const accent = useGroupAccent(parentId);
   const width = data.width ?? DEFAULT_WIDTH;
@@ -52,22 +51,6 @@ export function OutputNode({ id, data, parentId, selected }: NodeProps<OutputCan
     if (data.status !== "error" || !isStaleGenerationConfigurationError(data.error)) return;
     updateNodeData(id, { status: "idle", error: undefined });
   }, [data.error, data.status, id, updateNodeData]);
-
-  async function downloadResult() {
-    if (!resultUrl) return;
-    setDownloading(true);
-    try {
-      await downloadImageFile({
-        url: resultUrl,
-        baseName: `generated-${data.model ?? "image"}`,
-        outputFormat: data.outputFormat,
-      });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to download this image.");
-    } finally {
-      setDownloading(false);
-    }
-  }
 
   function stopGeneration() {
     if (cancelGenerationRun(id)) {
@@ -161,18 +144,13 @@ export function OutputNode({ id, data, parentId, selected }: NodeProps<OutputCan
             >
               <Link2 className="size-3.5" />
             </button>
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="outline"
+            <ImageDownloadButton
+              url={resultUrl}
+              baseName={`generated-${data.model ?? "image"}`}
               title="Download generated image"
-              aria-label="Download generated image"
-              disabled={downloading}
-              className="nodrag nopan bg-background/85 absolute top-2 right-11 z-10 shadow-sm backdrop-blur-sm"
-              onClick={() => void downloadResult()}
-            >
-              {downloading ? <Loader2 className="animate-spin" /> : <Download />}
-            </Button>
+              ariaLabel="Download generated image"
+              className="nodrag nopan absolute top-2 right-11 z-10 shadow-sm"
+            />
           </>
         ) : data.status === "error" ? (
           <p className="text-destructive px-3 text-center text-xs">
