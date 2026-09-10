@@ -36,6 +36,9 @@ export async function GET() {
   const emailByUser = new Map(
     (authUsers?.users ?? []).map((u) => [u.id, u.email ?? ""]),
   );
+  const lastSignInByUser = new Map(
+    (authUsers?.users ?? []).map((u) => [u.id, u.last_sign_in_at ?? null]),
+  );
 
   const [
     { data: profiles, error: profilesError },
@@ -68,6 +71,7 @@ export async function GET() {
     return {
       id: profile.id,
       email: emailByUser.get(profile.id) ?? "",
+      last_login_at: lastSignInByUser.get(profile.id) ?? null,
       display_name: profile.display_name ?? "",
       access_level: profile.access_level,
       is_admin: isAdminUser,

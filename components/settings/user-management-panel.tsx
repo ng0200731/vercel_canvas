@@ -31,6 +31,7 @@ type UserRecord = {
 type ManagedUser = {
   id: string;
   email: string;
+  last_login_at: string | null;
   display_name: string;
   access_level: number;
   is_admin: boolean;
@@ -257,7 +258,7 @@ export function UserManagementPanel() {
       ) : (
         <div className="bg-card flex flex-col overflow-hidden rounded-lg border shadow-sm">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-left text-sm">
+            <table className="w-full min-w-[860px] text-left text-sm">
               <thead className="bg-muted/60 text-muted-foreground border-b text-xs font-medium tracking-wide uppercase">
                 <tr>
                   <th scope="col" className="px-4 py-3">
@@ -271,6 +272,9 @@ export function UserManagementPanel() {
                   </th>
                   <th scope="col" className="px-4 py-3">
                     Generations
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Last login
                   </th>
                   <th scope="col" className="w-36 px-4 py-3 text-right">
                     Actions
@@ -318,6 +322,13 @@ export function UserManagementPanel() {
                             <span>
                               {user.used} / {user.limit} used · {user.remaining} left
                             </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 align-top tabular-nums">
+                          {user.last_login_at ? (
+                            <span className="text-muted-foreground">{formatDate(user.last_login_at)}</span>
+                          ) : (
+                            <span className="text-muted-foreground">Never</span>
                           )}
                         </td>
                         <td className="px-4 py-3 align-top">
@@ -392,7 +403,7 @@ export function UserManagementPanel() {
                       </tr>
                       {expanded ? (
                         <tr key={`${user.id}-records`}>
-                          <td colSpan={5} className="bg-muted/20 px-4 py-3">
+                          <td colSpan={6} className="bg-muted/20 px-4 py-3">
                             {user.records.length === 0 ? (
                               <p className="text-muted-foreground py-2 text-center text-xs">
                                 No generations recorded.
