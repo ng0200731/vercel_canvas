@@ -35,6 +35,7 @@ const employeeRowSchema = z.object({
 
 const customerRowSchema = z.object({
   id: z.string(),
+  user_id: z.string().nullable().optional(),
   company_name: z.string(),
   email_domain_suffix: z.string(),
   customer_type: z.string(),
@@ -44,6 +45,7 @@ const customerRowSchema = z.object({
 
 const supplierRowSchema = z.object({
   id: z.string(),
+  user_id: z.string().nullable().optional(),
   company_name: z.string(),
   email_domain_suffix: z.string(),
   product_types: z.array(z.string()),
@@ -66,6 +68,7 @@ const productVariantRowSchema = z.object({
 
 const productRowSchema = z.object({
   id: z.string(),
+  user_id: z.string().nullable().optional(),
   owner_kind: z.enum(["supplier", "customer"]).optional(),
   supplier_id: z.string().nullable().optional(),
   customer_id: z.string().nullable().optional(),
@@ -182,6 +185,7 @@ function mapCustomer(rowValue: unknown, employeeRows: unknown): CustomerRecord {
   const row = customerRowSchema.parse(rowValue);
   return {
     id: row.id,
+    userId: row.user_id ?? null,
     company: {
       companyName: row.company_name,
       emailDomainSuffix: row.email_domain_suffix,
@@ -197,6 +201,7 @@ function mapSupplier(rowValue: unknown, employeeRows: unknown): SupplierRecord {
   const row = supplierRowSchema.parse(rowValue);
   return {
     id: row.id,
+    userId: row.user_id ?? null,
     company: {
       companyName: row.company_name,
       emailDomainSuffix: row.email_domain_suffix,
@@ -212,6 +217,7 @@ function mapProduct(rowValue: unknown): ProductRecord {
   const row = productRowSchema.parse(rowValue);
   return normalizeProductRecord({
     id: row.id,
+    userId: row.user_id ?? null,
     ownerKind: row.owner_kind,
     supplierId: row.supplier_id ?? null,
     customerId: row.customer_id ?? null,
@@ -299,7 +305,7 @@ export function createSupabaseWorkspaceRecordStore(): WorkspaceRecordStore {
       const { data, error } = await supabase
         .from("customers")
         .select(
-          "id, company_name, email_domain_suffix, customer_type, created_at, updated_at, customer_employees(id, user_name, email_prefix, title, tel, sort_index)",
+          "id, user_id, company_name, email_domain_suffix, customer_type, created_at, updated_at, customer_employees(id, user_name, email_prefix, title, tel, sort_index)",
         )
         .order("updated_at", { ascending: false });
       assertNoError({ error }, "listCustomers");
@@ -328,7 +334,7 @@ export function createSupabaseWorkspaceRecordStore(): WorkspaceRecordStore {
       const { data, error } = await supabase
         .from("suppliers")
         .select(
-          "id, company_name, email_domain_suffix, product_types, created_at, updated_at, supplier_employees(id, user_name, email_prefix, title, tel, sort_index)",
+          "id, user_id, company_name, email_domain_suffix, product_types, created_at, updated_at, supplier_employees(id, user_name, email_prefix, title, tel, sort_index)",
         )
         .order("updated_at", { ascending: false });
       assertNoError({ error }, "listSuppliers");
@@ -363,7 +369,7 @@ export function createSupabaseWorkspaceRecordStore(): WorkspaceRecordStore {
       const query = await supabase
         .from("products")
         .select(
-          "id, owner_kind, supplier_id, customer_id, project_id, product_type, subject, detail, material, color_notes, parameters, unit_price, price_unit, image_name, image_url, image_storage_path, created_at, updated_at, product_variants(id, sort_index, material, color_notes, parameters, unit_price, price_unit, image_name, image_url, image_storage_path)",
+          "id, user_id, owner_kind, supplier_id, customer_id, project_id, product_type, subject, detail, material, color_notes, parameters, unit_price, price_unit, image_name, image_url, image_storage_path, created_at, updated_at, product_variants(id, sort_index, material, color_notes, parameters, unit_price, price_unit, image_name, image_url, image_storage_path)",
         )
         .order("updated_at", { ascending: false });
       if (query.error && isProductSchemaCacheMismatch(query.error.message)) {

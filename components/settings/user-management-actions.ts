@@ -129,6 +129,57 @@ export async function deleteUser(userId: string) {
 }
 
 /**
+ * Admin-only: set a user's lifetime generation allowance to a specific number.
+ * Remaining generations = target allowance − generations already used. The
+ * service-role client bypasses RLS so admins can write any user's row.
+ */
+export async function setUserGenerationLimit(userId: string, generationLimit: number) {
+  const { isAdmin } = await getCurrentAdminAccess();
+  if (!isAdmin) {
+    throw new Error("Forbidden: only an admin can change generation allowances.");
+  }
+  assertUuid(userId);
+  if (!Number.isInteger(generationLimit) || generationLimit < 0) {
+    throw new Error("Enter a whole number of 0 or more.");
+  }
+
+  const supabase = getSupabaseServiceClient();
+  const { error } = await supabase.from("generation_allowance").upsert(
+    { user_id: userId, generation_limit: generationLimit },
+    { onConflict: "user_id" },
+  );
+  if (error) {
+    throw new Error(`Failed to update the generation allowance: ${error.message}`);
+  }
+
+  revalidatePath("/");
+  return { ok: true, generationLimit };
+}
+
+/**
+ * Admin-only: set a user's password directly (not via an email link).
+ */
+export async function setUserPassword(userId: string, newPassword: string) {
+  const { isAdmin } = await getCurrentAdminAccess();
+  if (!isAdmin) {
+    throw new Error("Forbidden: only an admin can reset passwords.");
+  }
+  assertUuid(userId);
+  if (!newPassword || newPassword.length < 6) {
+    throw new Error("Password must be at least 6 characters.");
+  }
+
+  const supabase = getSupabaseServiceClient();
+  const { error } = await supabase.auth.admin.updateUserById(userId, { password: newPassword });
+  if (error) {
+    throw new Error(`Failed to reset the password: ${error.message}`);
+  }
+
+  revalidatePath("/");
+  return { ok: true };
+}
+
+/**
  * Admin-only: send the user a password-recovery email. The email is resolved
  * server-side (never trusted from the client); no password is set or returned.
  */
@@ -172,4 +223,43 @@ async function removeUploadsFolder(
   if (paths.length > 0) {
     await supabase.storage.from("uploads").remove(paths);
   }
+}
+
+/**
+ * Any signed-in user: change their own password. The current password is
+ * verified first (by re-signing in under the user's session), so a bad or
+ * forgotten current password is rejected instead of silently overwriting it.
+ */
+export async function changeOwnPassword(currentPassword: string, newPassword: string) {
+  if (!currentPassword) {
+    throw new Error("Enter your current password.");
+  }
+  if (!newPassword || newPassword.length < 6) {
+    throw new Error("New password must be at least 6 characters.");
+  }
+
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user?.email) {
+    throw new Error("You must be signed in to change your password.");
+  }
+
+  // Verify the current password by signing in with the session's email.
+  const { error: signInError } = await supabase.auth.signInWithPassword({
+    email: user.email,
+    password: currentPassword,
+  });
+  if (signInError) {
+    throw new Error("Your current password is incorrect.");
+  }
+
+  const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+  if (updateError) {
+    throw new Error(`Failed to change the password: ${updateError.message}`);
+  }
+
+  revalidatePath("/");
+  return { ok: true };
 }

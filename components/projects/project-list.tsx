@@ -21,11 +21,13 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CreateProjectDialog } from "@/components/projects/create-project-dialog";
+import { CreatorCell } from "@/components/creator-cell";
 import { canvasPurchaseTargets } from "@/lib/canvas-purchase";
 import { useDeleteProject, useProjects } from "@/lib/hooks/use-projects";
 import { SAMPLE_ORDERS_KEY } from "@/lib/hooks/use-sample-orders";
 import { useCustomers, useProducts, useSuppliers } from "@/lib/hooks/use-workspace-records";
 import { formatDate } from "@/lib/format";
+import { useAdminCreators } from "@/lib/hooks/use-admin-creators";
 import { sendSamplePurchases } from "@/lib/sample-purchase-client";
 import { getCanvasStore, type Canvas, type CanvasSendRecord, type Project } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -142,12 +144,14 @@ function ProjectCanvasDetailRow({
   loading,
   sendsByCanvasId,
   onOpenCanvas,
+  isAdmin = false,
 }: {
   project: Project;
   canvases: readonly Canvas[] | undefined;
   loading: boolean;
   sendsByCanvasId: Map<string, readonly CanvasSendRecord[]>;
   onOpenCanvas?: (projectId: string, canvasId: string) => void;
+  isAdmin?: boolean;
 }) {
   const suppliers = useSuppliers();
   const products = useProducts();
@@ -248,7 +252,7 @@ function ProjectCanvasDetailRow({
 
   return (
     <tr className="bg-muted/20">
-      <td colSpan={9} className="px-4 py-3">
+      <td colSpan={isAdmin ? 10 : 9} className="px-4 py-3">
         {loading ? (
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 3 }).map((_, index) => (
@@ -332,13 +336,16 @@ function ProjectTable({
   onOpenCanvas,
   stickyTopClassName,
   tableViewportClassName,
+  isAdmin = false,
 }: {
   projects: Project[];
   onOpenProject?: (projectId: string) => void;
   onOpenCanvas?: (projectId: string, canvasId: string) => void;
   stickyTopClassName: string;
   tableViewportClassName?: string;
+  isAdmin?: boolean;
 }) {
+  const creators = useAdminCreators(isAdmin);
   const del = useDeleteProject();
   const tableScrollRef = useRef<HTMLDivElement | null>(null);
   const topScrollRef = useRef<HTMLDivElement | null>(null);
@@ -480,6 +487,11 @@ function ProjectTable({
               <th scope="col" className="px-4 py-3 text-center">
                 Canvas #
               </th>
+              {isAdmin ? (
+                <th scope="col" className="px-4 py-3">
+                  Creator
+                </th>
+              ) : null}
               <th scope="col" className="w-28 px-4 py-3 text-right">
                 Actions
               </th>
@@ -513,6 +525,7 @@ function ProjectTable({
                   "bg-background h-8 min-w-20 text-xs normal-case",
                 )}
               </th>
+              {isAdmin ? <th scope="col" className="px-4 py-2" /> : null}
               <th scope="col" className="px-4 py-2" />
             </tr>
           </thead>
@@ -591,6 +604,11 @@ function ProjectTable({
                           {canvasResult?.isLoading ? "..." : count}
                         </Button>
                       </td>
+                      {isAdmin ? (
+                        <td className="max-w-48 px-4 py-3 align-top break-words">
+                          <CreatorCell creators={creators} userId={project.userId} />
+                        </td>
+                      ) : null}
                       <td className="px-4 py-3 align-top">
                         <div className="flex justify-end gap-1">
                           {onOpenProject ? (
@@ -636,6 +654,7 @@ function ProjectTable({
                         canvases={canvases}
                         loading={Boolean(canvasResult?.isLoading)}
                         sendsByCanvasId={sendsByCanvasId}
+                        isAdmin={isAdmin}
                         onOpenCanvas={onOpenCanvas}
                       />
                     ) : null}
@@ -644,7 +663,7 @@ function ProjectTable({
               })
             ) : (
               <tr>
-                <td colSpan={9} className="text-muted-foreground px-4 py-10 text-center">
+                <td colSpan={isAdmin ? 10 : 9} className="text-muted-foreground px-4 py-10 text-center">
                   No matching projects.
                 </td>
               </tr>
@@ -661,6 +680,7 @@ export function ProjectList({
   onOpenProject,
   onOpenCanvas,
   onProjectCreated,
+  isAdmin = false,
   stickyTopClassName = "top-14",
   className,
   tableViewportClassName,
@@ -669,6 +689,7 @@ export function ProjectList({
   onOpenProject?: (projectId: string) => void;
   onOpenCanvas?: (projectId: string, canvasId: string) => void;
   onProjectCreated?: (projectId: string) => void;
+  isAdmin?: boolean;
   stickyTopClassName?: string;
   className?: string;
   tableViewportClassName?: string;
@@ -710,6 +731,7 @@ export function ProjectList({
           onOpenCanvas={onOpenCanvas}
           stickyTopClassName={stickyTopClassName}
           tableViewportClassName={tableViewportClassName}
+          isAdmin={isAdmin}
         />
       ) : (
         <div className="bg-card flex min-h-80 flex-col items-center justify-center gap-4 rounded-lg border border-dashed p-8 text-center shadow-sm">

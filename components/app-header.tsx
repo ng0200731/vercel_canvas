@@ -9,10 +9,12 @@ export function AppHeader({
   email,
   isAdmin,
   authEnabled,
+  generationsLeft,
 }: {
   email: string | null;
   isAdmin?: boolean;
   authEnabled: boolean;
+  generationsLeft: number | null;
 }) {
   return (
     <header className="bg-background/90 supports-[backdrop-filter]:bg-background/75 sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between border-b px-4 backdrop-blur">
@@ -31,6 +33,14 @@ export function AppHeader({
               </span>
             ) : null}
             <span className="text-muted-foreground hidden text-xs sm:inline">{email}</span>
+            {!isAdmin && generationsLeft !== null ? (
+              <span
+                className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums"
+                title="Generations remaining"
+              >
+                {generationsLeft} left
+              </span>
+            ) : null}
             <form action={signOut}>
               <Button size="sm" variant="ghost" type="submit">
                 Sign out

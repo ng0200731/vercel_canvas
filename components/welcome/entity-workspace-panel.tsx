@@ -87,6 +87,8 @@ import {
 import type { ProductImageGalleryItem } from "@/lib/product-image-gallery";
 import { productRecordSearchText } from "@/lib/product-image-gallery";
 import { uploadImage } from "@/lib/upload";
+import { useAdminCreators, type CreatorInfo } from "@/lib/hooks/use-admin-creators";
+import { CreatorCell } from "@/components/creator-cell";
 import { cn } from "@/lib/utils";
 
 type EntityKind = "customer" | "supplier" | "product";
@@ -1762,11 +1764,15 @@ function PartyWorkspacePanel({
   mode,
   onModeChange,
   formVersion,
+  isAdmin = false,
+  creators = new Map<string, CreatorInfo>(),
 }: {
   kind: PartyKind;
   mode: "new" | "records";
   onModeChange: (mode: "new" | "records") => void;
   formVersion: number;
+  isAdmin?: boolean;
+  creators?: Map<string, CreatorInfo>;
 }) {
   const [activeSubTab, setActiveSubTab] = useState<PartySubTab>("company");
   const [customerCompany, setCustomerCompany] = useState<CustomerCompanyState>({
@@ -2104,6 +2110,7 @@ function PartyWorkspacePanel({
                       <th className="px-4 py-3">Product types</th>
                       <th className="px-4 py-3">Employees</th>
                       <th className="px-4 py-3">Products</th>
+                      {isAdmin ? <th className="px-4 py-3">Creator</th> : null}
                       <th className="px-4 py-3 text-right">Actions</th>
                     </tr>
                     <tr className="bg-background/90 normal-case">
@@ -2173,6 +2180,7 @@ function PartyWorkspacePanel({
                           aria-label="Filter suppliers by products"
                         />
                       </th>
+                      {isAdmin ? <th className="px-4 py-2" /> : null}
                       <th className="text-muted-foreground px-4 py-2 text-right">Actions</th>
                     </tr>
                   </thead>
@@ -2180,7 +2188,7 @@ function PartyWorkspacePanel({
                     {filteredSupplierRecords.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={7}
+                          colSpan={isAdmin ? 8 : 7}
                           className="text-muted-foreground px-4 py-10 text-center text-sm"
                         >
                           No suppliers match the active filters.
@@ -2232,6 +2240,11 @@ function PartyWorkspacePanel({
                           </td>
                           <td className="px-4 py-3">{record.employees.length}</td>
                           <td className="px-4 py-3">{productRecords.length}</td>
+                          {isAdmin ? (
+                            <td className="max-w-44 px-4 py-3 break-words">
+                              <CreatorCell creators={creators} userId={record.userId} />
+                            </td>
+                          ) : null}
                           <td className="px-4 py-3 text-right">
                             <div className="flex justify-end gap-2">
                               {hasProductImages ? (
@@ -2297,6 +2310,7 @@ function PartyWorkspacePanel({
                     <th className="px-4 py-3">Name</th>
                     <th className="px-4 py-3">Email / domain</th>
                     <th className="px-4 py-3">Details</th>
+                    {isAdmin ? <th className="px-4 py-3">Creator</th> : null}
                     <th className="px-4 py-3 text-right">Action</th>
                   </tr>
                 </thead>
@@ -2370,6 +2384,11 @@ function PartyWorkspacePanel({
                             ) : null}
                           </div>
                         </td>
+                        {isAdmin ? (
+                          <td className="max-w-44 px-4 py-3 break-words">
+                            <CreatorCell creators={creators} userId={record.userId} />
+                          </td>
+                        ) : null}
                         <td className="px-4 py-3 text-right">
                           <div className="flex justify-end gap-2">
                             <Button
@@ -2592,6 +2611,8 @@ function ProductWorkspacePanel({
   ownerKind = "supplier",
   initialSupplierId = null,
   initialCustomerId = null,
+  isAdmin = false,
+  creators = new Map<string, CreatorInfo>(),
 }: {
   mode: "new" | "records";
   onModeChange: (mode: "new" | "records") => void;
@@ -2601,6 +2622,8 @@ function ProductWorkspacePanel({
   ownerKind?: ProductOwnerKind;
   initialSupplierId?: string | null;
   initialCustomerId?: string | null;
+  isAdmin?: boolean;
+  creators?: Map<string, CreatorInfo>;
 }) {
   const fileInputId = useId();
   const [supplierQuery, setSupplierQuery] = useState("");
@@ -2979,6 +3002,7 @@ function ProductWorkspacePanel({
                     <th className="px-4 py-3">Subject</th>
                     <th className="px-4 py-3">Variants</th>
                     <th className="px-4 py-3">Unit price</th>
+                    {isAdmin ? <th className="px-4 py-3">Creator</th> : null}
                     <th className="px-4 py-3 text-right">Action</th>
                   </tr>
                 </thead>
@@ -3007,6 +3031,11 @@ function ProductWorkspacePanel({
                             {primaryVariant?.priceUnit ?? ""}
                           </span>
                         </td>
+                        {isAdmin ? (
+                          <td className="max-w-44 px-4 py-3 break-words">
+                            <CreatorCell creators={creators} userId={product.userId} />
+                          </td>
+                        ) : null}
                         <td className="px-4 py-3 text-right">
                           <div className="flex justify-end gap-2">
                             <ProductImageBrowserDialog
@@ -3476,15 +3505,24 @@ export function EntityWorkspacePanel({
   mode = "new",
   onModeChange = () => undefined,
   formVersion = 0,
+  isAdmin = false,
 }: {
   kind: EntityKind;
   mode?: "new" | "records";
   onModeChange?: (mode: "new" | "records") => void;
   formVersion?: number;
+  isAdmin?: boolean;
 }) {
+  const creators = useAdminCreators(isAdmin);
   if (kind === "product")
     return (
-      <ProductWorkspacePanel mode={mode} onModeChange={onModeChange} formVersion={formVersion} />
+      <ProductWorkspacePanel
+        mode={mode}
+        onModeChange={onModeChange}
+        formVersion={formVersion}
+        isAdmin={isAdmin}
+        creators={creators}
+      />
     );
   return (
     <PartyWorkspacePanel
@@ -3492,6 +3530,8 @@ export function EntityWorkspacePanel({
       mode={mode}
       onModeChange={onModeChange}
       formVersion={formVersion}
+      isAdmin={isAdmin}
+      creators={creators}
     />
   );
 }

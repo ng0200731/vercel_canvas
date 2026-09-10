@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ComponentType, type ReactNode } from "react";
+import { useState, type ComponentType, type ReactNode } from "react";
 import {
   Boxes,
   ChevronDown,
@@ -20,6 +20,7 @@ import { CanvasEditor } from "@/components/canvas/canvas-editor";
 import { CanvasList } from "@/components/projects/canvas-list";
 import { ProjectHeader } from "@/components/projects/project-header";
 import { ProjectList } from "@/components/projects/project-list";
+import { ChangePasswordPanel } from "@/components/settings/change-password-panel";
 import { GenericNodeSettingsPanel } from "@/components/settings/generic-node-settings-panel";
 import { GeminiSearchSettingsPanel } from "@/components/settings/gemini-search-settings-panel";
 import { OrderedOptionSettingsPanel } from "@/components/settings/ordered-option-settings-panel";
@@ -157,6 +158,7 @@ function ProjectWorkspacePanel({
   onOpenCanvasFromProject,
   onBackToProjects,
   onBackToProjectDetail,
+  isAdmin = false,
 }: {
   selectedProjectId: string | null;
   selectedCanvasId: string | null;
@@ -165,6 +167,7 @@ function ProjectWorkspacePanel({
   onOpenCanvasFromProject: (projectId: string, canvasId: string) => void;
   onBackToProjects: () => void;
   onBackToProjectDetail: () => void;
+  isAdmin?: boolean;
 }) {
   if (!selectedProjectId) {
     return (
@@ -173,6 +176,7 @@ function ProjectWorkspacePanel({
         onOpenProject={onOpenProject}
         onOpenCanvas={onOpenCanvasFromProject}
         onProjectCreated={onOpenProject}
+        isAdmin={isAdmin}
         stickyTopClassName="top-0"
         className="h-full"
         tableViewportClassName="flex-1"
@@ -228,6 +232,7 @@ function renderTabContent({
   entityMode,
   onEntityModeChange,
   entityFormVersion,
+  isAdmin,
 }: {
   tabId: TabId;
   selectedProjectId: string | null;
@@ -240,6 +245,7 @@ function renderTabContent({
   entityMode: WorkspaceMode;
   onEntityModeChange: (mode: WorkspaceMode) => void;
   entityFormVersion: number;
+  isAdmin: boolean;
 }): ReactNode {
   if (tabId === "project") {
     return (
@@ -251,6 +257,7 @@ function renderTabContent({
         onOpenCanvasFromProject={onOpenCanvasFromProject}
         onBackToProjects={onBackToProjects}
         onBackToProjectDetail={onBackToProjectDetail}
+        isAdmin={isAdmin}
       />
     );
   }
@@ -262,7 +269,7 @@ function renderTabContent({
   if (tabId === "address-book-settings") return <OrderedOptionSettingsPanel kind="address-book" />;
   if (tabId === "generic-node-settings") return <GenericNodeSettingsPanel />;
   if (tabId === "gemini-settings") return <GeminiSearchSettingsPanel />;
-  if (tabId === "users") return <UserManagementPanel />;
+  if (tabId === "users") return isAdmin ? <UserManagementPanel /> : <ChangePasswordPanel />;
   if (tabId === "customer")
     return (
       <EntityWorkspacePanel
@@ -270,6 +277,7 @@ function renderTabContent({
         mode={entityMode}
         onModeChange={onEntityModeChange}
         formVersion={entityFormVersion}
+        isAdmin={isAdmin}
       />
     );
   if (tabId === "supplier")
@@ -279,6 +287,7 @@ function renderTabContent({
         mode={entityMode}
         onModeChange={onEntityModeChange}
         formVersion={entityFormVersion}
+        isAdmin={isAdmin}
       />
     );
   return (
@@ -287,6 +296,7 @@ function renderTabContent({
       mode={entityMode}
       onModeChange={onEntityModeChange}
       formVersion={entityFormVersion}
+      isAdmin={isAdmin}
     />
   );
 }
@@ -310,15 +320,10 @@ export function WorkspaceShell({
   const [entityMode, setEntityMode] = useState<WorkspaceMode>("new");
   const [entityFormVersion, setEntityFormVersion] = useState(0);
 
-  // The "User" management item is admin-only.
-  const visibleSections = useMemo(() => {
-    if (isAdmin) return sections;
-    return sections.map((section) =>
-      section.id === "settings"
-        ? { ...section, items: section.items.filter((item) => item.tab !== "users") }
-        : section,
-    );
-  }, [isAdmin]);
+  // The "User" settings item is shown to everyone: admins manage accounts,
+  // regular users change their own password (rendered by role in
+  // renderTabContent).
+  const visibleSections = sections;
 
   function syncMenuToTab(tabId: TabId) {
     const sectionId = sectionForTab(tabId);
@@ -571,6 +576,7 @@ export function WorkspaceShell({
               entityMode,
               onEntityModeChange: setEntityMode,
               entityFormVersion,
+              isAdmin: isAdmin === true,
             })
           ) : (
             <div className="mx-auto flex h-full min-h-96 w-full max-w-4xl flex-col justify-center">

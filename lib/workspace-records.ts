@@ -287,6 +287,7 @@ export interface EmployeeRecord extends EmployeeInput {
 
 export interface CustomerRecord {
   id: string;
+  userId?: string | null;
   company: CustomerCompanyInput;
   employees: EmployeeRecord[];
   createdAt: string;
@@ -295,6 +296,7 @@ export interface CustomerRecord {
 
 export interface SupplierRecord {
   id: string;
+  userId?: string | null;
   company: SupplierCompanyInput;
   employees: EmployeeRecord[];
   createdAt: string;
@@ -307,6 +309,7 @@ export interface ProductVariantRecord extends Omit<ProductVariantInput, "image">
 
 export interface ProductRecord {
   id: string;
+  userId?: string | null;
   ownerKind: ProductOwnerKind;
   supplierId: string | null;
   customerId: string | null;
@@ -420,6 +423,7 @@ export function normalizeProductRecord(value: unknown): ProductRecord {
 
   return {
     id: typeof candidate.id === "string" ? candidate.id : "",
+    userId: typeof candidate.userId === "string" && candidate.userId.trim() ? candidate.userId : null,
     ownerKind,
     supplierId:
       typeof candidate.supplierId === "string" && candidate.supplierId.trim()

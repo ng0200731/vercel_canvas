@@ -11,6 +11,7 @@ export interface Project extends ProjectMetadata {
   id: string;
   name: string;
   description: string | null;
+  userId?: string | null;
   createdAt: string;
   updatedAt: string;
 }

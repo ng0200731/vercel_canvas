@@ -1,12 +1,28 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useState, type FormEvent } from "react";
-import { ChevronDown, Mail, RefreshCw, ShieldAlert, Trash2 } from "lucide-react";
+import {
+  ChevronDown,
+  Gauge,
+  KeyRound,
+  Mail,
+  RefreshCw,
+  ShieldAlert,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,6 +32,8 @@ import {
   deleteUser,
   sendUserPasswordReset,
   setUserActive,
+  setUserGenerationLimit,
+  setUserPassword,
 } from "./user-management-actions";
 import { SettingsPanelHeader } from "./settings-panel-header";
 
@@ -56,15 +74,19 @@ export function UserManagementPanel() {
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [busy, setBusy] = useState<
-    | { id: string; action: "toggle" | "reset" | "delete" | "create" }
+    | { id: string; action: "toggle" | "reset" | "delete" | "create" | "limit" | "password" }
     | null
   >(null);
-  const isBusy = (id: string, action?: "toggle" | "reset" | "delete" | "create") =>
+  const isBusy = (id: string, action?: "toggle" | "reset" | "delete" | "create" | "limit" | "password") =>
     busy !== null && busy.id === id && (action === undefined || busy.action === action);
   const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newDisplayName, setNewDisplayName] = useState("");
   const creating = isBusy("new", "create");
+
+  const [editing, setEditing] = useState<{ user: ManagedUser; kind: "limit" | "password" } | null>(null);
+  const [allowanceInput, setAllowanceInput] = useState("");
+  const [directPasswordInput, setDirectPasswordInput] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -157,6 +179,50 @@ export function UserManagementPanel() {
       await load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not create the account.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function openLimitDialog(user: ManagedUser) {
+    setAllowanceInput(user.limit?.toString() ?? "");
+    setEditing({ user, kind: "limit" });
+  }
+
+  function openPasswordDialog(user: ManagedUser) {
+    setDirectPasswordInput("");
+    setEditing({ user, kind: "password" });
+  }
+
+  async function submitLimit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!editing || editing.kind !== "limit") return;
+    const parsed = Number(allowanceInput);
+    setBusy({ id: editing.user.id, action: "limit" });
+    try {
+      await setUserGenerationLimit(editing.user.id, parsed);
+      toast.success(`Allowance set for ${editing.user.email}.`);
+      setEditing(null);
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update the allowance.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function submitDirectPassword(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!editing || editing.kind !== "password") return;
+    setBusy({ id: editing.user.id, action: "password" });
+    try {
+      await setUserPassword(editing.user.id, directPasswordInput);
+      toast.success(`Password reset for ${editing.user.email}.`);
+      setEditing(null);
+      setDirectPasswordInput("");
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not reset the password.");
     } finally {
       setBusy(null);
     }
@@ -347,6 +413,32 @@ export function UserManagementPanel() {
                             >
                               {isBusy(user.id, "toggle") ? "Saving…" : user.active ? "Deactivate" : "Activate"}
                             </Button>
+                            <Button
+                              type="button"
+                              size="icon-sm"
+                              variant="ghost"
+                              aria-label={`Set generation allowance for ${user.email}`}
+                              disabled={busy !== null || user.is_admin}
+                              title={
+                                user.is_admin
+                                  ? "Admin accounts are unlimited."
+                                  : "Set the number of generations"
+                              }
+                              onClick={() => openLimitDialog(user)}
+                            >
+                              <Gauge />
+                            </Button>
+                            <Button
+                              type="button"
+                              size="icon-sm"
+                              variant="ghost"
+                              aria-label={`Reset password for ${user.email}`}
+                              disabled={busy !== null}
+                              title="Reset password (set a new one directly)"
+                              onClick={() => openPasswordDialog(user)}
+                            >
+                              <KeyRound />
+                            </Button>
                             <ConfirmDialog
                               title="Send password reset email?"
                               description={`A password recovery link will be sent to ${user.email}. Their password will not be shown or changed here.`}
@@ -450,6 +542,94 @@ export function UserManagementPanel() {
           </div>
         </div>
       )}
+
+      <Dialog open={editing !== null} onOpenChange={(open) => !open && setEditing(null)}>
+        {editing?.kind === "limit" ? (
+          <DialogContent>
+            <form onSubmit={(e) => void submitLimit(e)}>
+              <DialogHeader>
+                <DialogTitle>Set generation allowance</DialogTitle>
+                <DialogDescription>
+                  Set the lifetime allowance for {editing.user.email}. Their remaining count becomes
+                  this allowance minus the generations they have already used (
+                  {editing.user.used} used).
+                </DialogDescription>
+              </DialogHeader>
+              <div className="my-4 flex flex-col gap-1.5">
+                <Label htmlFor="allowance-input">Generation allowance</Label>
+                <Input
+                  id="allowance-input"
+                  type="number"
+                  min={0}
+                  step={1}
+                  required
+                  inputMode="numeric"
+                  autoFocus
+                  value={allowanceInput}
+                  onChange={(e) => setAllowanceInput(e.target.value)}
+                />
+              </div>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setEditing(null)}
+                  disabled={busy !== null}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={busy !== null || !Number.isInteger(Number(allowanceInput))}
+                >
+                  {isBusy(editing.user.id, "limit") ? "Saving…" : "Set allowance"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        ) : editing?.kind === "password" ? (
+          <DialogContent>
+            <form onSubmit={(e) => void submitDirectPassword(e)}>
+              <DialogHeader>
+                <DialogTitle>Reset password</DialogTitle>
+                <DialogDescription>
+                  Set a new password directly for {editing.user.email}. They will sign in with this
+                  new password from now on.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="my-4 flex flex-col gap-1.5">
+                <Label htmlFor="direct-password-input">New password</Label>
+                <Input
+                  id="direct-password-input"
+                  type="password"
+                  required
+                  minLength={6}
+                  autoComplete="new-password"
+                  autoFocus
+                  value={directPasswordInput}
+                  onChange={(e) => setDirectPasswordInput(e.target.value)}
+                />
+              </div>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setEditing(null)}
+                  disabled={busy !== null}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={busy !== null || directPasswordInput.length < 6}
+                >
+                  {isBusy(editing.user.id, "password") ? "Saving…" : "Set password"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        ) : null}
+      </Dialog>
     </div>
   );
 }

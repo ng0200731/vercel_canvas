@@ -48,6 +48,7 @@ import type {
 
 interface ProjectRow {
   id: string;
+  user_id?: string | null;
   name: string;
   description: string | null;
   customer_id?: string | null;
@@ -114,6 +115,7 @@ interface ImageRow {
 
 const projectRowSchema = z.object({
   id: z.string(),
+  user_id: z.string().nullable().optional(),
   name: z.string(),
   description: z.string().nullable(),
   customer_id: z.string().nullable().optional(),
@@ -262,6 +264,7 @@ const mapProject = (value: unknown): Project => {
   );
   return {
     id: r.id,
+    userId: r.user_id ?? null,
     name: r.name,
     description: r.description,
     ...metadata,
@@ -271,7 +274,7 @@ const mapProject = (value: unknown): Project => {
 };
 
 const PROJECT_COLUMNS =
-  "id, name, description, customer_id, customer_name, employee_id, employee_name, employee_title, employee_email, employee_tel, currency_code, currency_name, currency_symbol, destination_country_code, destination_country_name, created_at, updated_at";
+  "id, user_id, name, description, customer_id, customer_name, employee_id, employee_name, employee_title, employee_email, employee_tel, currency_code, currency_name, currency_symbol, destination_country_code, destination_country_name, created_at, updated_at";
 const LEGACY_PROJECT_COLUMNS = "id, name, description, created_at, updated_at";
 
 function isProjectMetadataSchemaMismatch(message: string): boolean {
