@@ -724,6 +724,8 @@ export function GenerateNode({ id, data, parentId, selected }: NodeProps<Generat
   const [invalidPromptRows, setInvalidPromptRows] = useState<ReadonlySet<string>>(new Set());
   const [maskPreviewRowId, setMaskPreviewRowId] = useState<string | null>(null);
   const [showLogOverlay, setShowLogOverlay] = useState(false);
+  // Provider / Version / Resolution / Size / Format defaults to collapsed; user expands when needed.
+  const [modelSectionCollapsed, setModelSectionCollapsed] = useState(true);
   const width = data.width ?? DEFAULT_WIDTH;
   const height = data.height ?? DEFAULT_HEIGHT;
   useEffect(() => {
@@ -1219,7 +1221,30 @@ export function GenerateNode({ id, data, parentId, selected }: NodeProps<Generat
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-x-hidden overflow-y-auto p-3">
-        <div className="grid grid-cols-2 gap-2">
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => setModelSectionCollapsed((collapsed) => !collapsed)}
+            aria-expanded={!modelSectionCollapsed}
+            className="nodrag nopan text-muted-foreground hover:text-foreground flex cursor-pointer items-center gap-1 text-xs select-none"
+          >
+            <ChevronRight
+              className={cn(
+                "size-3.5 transition-transform",
+                !modelSectionCollapsed && "rotate-90",
+              )}
+            />
+            Model settings
+          </button>
+          <span className="text-muted-foreground truncate font-mono text-[0.65rem]">
+            {selectedModel.officialName}
+            {provider === "gpt" ? " · output pinned to PNG" : null}
+          </span>
+        </div>
+
+        {!modelSectionCollapsed ? (
+          <>
+            <div className="grid grid-cols-2 gap-2">
           <div className="flex min-w-0 flex-col gap-1">
             <span className="text-muted-foreground text-xs">Provider</span>
             <Select
@@ -1424,11 +1449,8 @@ export function GenerateNode({ id, data, parentId, selected }: NodeProps<Generat
             </Select>
           </div>
         </div>
-
-        <p className="text-muted-foreground truncate font-mono text-[0.65rem]">
-          {selectedModel.officialName}
-          {provider === "gpt" ? " · output pinned to PNG" : null}
-        </p>
+          </>
+        ) : null}
 
         {hasGenerationReferences && hasMaskAttached ? (
           <label className="nodrag nopan flex items-center gap-2 text-xs">
