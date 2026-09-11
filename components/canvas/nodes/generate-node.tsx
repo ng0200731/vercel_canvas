@@ -1219,6 +1219,128 @@ export function GenerateNode({ id, data, parentId, selected }: NodeProps<Generat
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-x-hidden overflow-y-auto p-3">
+        {hasGenerationReferences && hasMaskAttached ? (
+          <label className="nodrag nopan flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={Boolean(data.matchSourceSize)}
+              disabled={isGenerating}
+              onChange={(event) => updateNodeData(id, { matchSourceSize: event.target.checked })}
+            />
+            <span>Match source size (recommended with mask)</span>
+          </label>
+        ) : null}
+
+        <div className="flex flex-col gap-1">
+          <div className="flex min-h-7 items-center justify-between gap-2">
+            <span className="text-muted-foreground text-xs">Reference image</span>
+            {hasReferenceItems && (
+              <ConfirmDialog
+                title="Remove all references?"
+                description="This disconnects every connected reference and removes all dropped reference images from this Generate node."
+                confirmLabel="Remove all"
+                onConfirm={removeAllReferences}
+                trigger={
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="ghost"
+                    disabled={isGenerating}
+                    className="nodrag nopan text-destructive hover:text-destructive"
+                  >
+                    <Trash2 />
+                    Clear all
+                  </Button>
+                }
+              />
+            )}
+          </div>
+          <div
+            className="bg-background/60 flex min-h-14 flex-wrap gap-1 rounded-md border border-dashed p-1"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              if (isGenerating) return;
+              e.preventDefault();
+              const url = e.dataTransfer.getData("application/ica-image-url");
+              if (url) addReference(url);
+            }}
+          >
+            {hasReferenceItems ? (
+              <>
+                {renderedReferences}
+                {manualImageReferences.map((url) => (
+                  <div
+                    key={url}
+                    className="group/reference relative size-9 overflow-hidden rounded"
+                  >
+                    <ImagePreviewDialog
+                      src={url}
+                      alt="Dropped reference"
+                      title="Dropped reference image"
+                      trigger={
+                        <button
+                          type="button"
+                          className="nodrag nopan focus-visible:ring-ring size-full cursor-zoom-in outline-none focus-visible:ring-2 focus-visible:ring-inset"
+                          aria-label="Enlarge dropped reference image"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={url} alt="" className="size-full object-cover" />
+                        </button>
+                      }
+                    />
+                    <ConfirmDialog
+                      title="Remove reference?"
+                      description="Remove this dropped image from the Generate node?"
+                      confirmLabel="Remove"
+                      onConfirm={() => removeReference(url)}
+                      trigger={
+                        <button
+                          type="button"
+                          aria-label="Remove reference"
+                          className="nodrag nopan bg-background/90 text-foreground focus-visible:ring-ring absolute top-0.5 right-0.5 z-10 flex size-5 items-center justify-center rounded-sm border opacity-0 shadow-sm transition-opacity group-hover/reference:opacity-100 focus-visible:opacity-100 focus-visible:ring-2"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      }
+                    />
+                  </div>
+                ))}
+              </>
+            ) : (
+              <span className="text-muted-foreground px-1 py-1 text-xs">
+                Drop an image reference
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="grid gap-1">
+          <span className="text-muted-foreground text-xs">Prompt</span>
+          <AliasMentionTextarea
+            value={data.prompt}
+            disabled={isGenerating}
+            aliases={aliasOptions}
+            masks={promptReferences.flatMap((reference) =>
+              reference.masks.map((mask) => ({ nodeId: reference.nodeId, name: mask.name })),
+            )}
+            onChange={(prompt) => updateNodeData(id, { prompt })}
+          />
+          <span className="text-muted-foreground text-[0.65rem]">
+            Add context or refine the generated prompt here.
+          </span>
+        </div>
+
+        <div className="grid gap-1">
+          <details className="nodrag nopan bg-background/60 rounded-md border p-2 text-xs">
+            <summary className="text-muted-foreground cursor-pointer text-xs select-none">
+              Preview final prompt sent to model
+            </summary>
+            <pre className="bg-muted/40 mt-2 max-h-64 overflow-auto rounded p-2 text-[0.7rem] leading-5 break-words whitespace-pre-wrap">
+              {previewFinalPrompt || "(Connect a reference and enter a prompt to preview.)"}
+            </pre>
+          </details>
+        </div>
+
         <details className="group bg-background/60 rounded-md border p-2 text-xs">
           <summary className="text-muted-foreground flex cursor-pointer list-none items-center justify-between gap-2 select-none [&::-webkit-details-marker]:hidden">
             <span className="flex items-center gap-1">
@@ -1439,18 +1561,6 @@ export function GenerateNode({ id, data, parentId, selected }: NodeProps<Generat
           </div>
         </details>
 
-        {hasGenerationReferences && hasMaskAttached ? (
-          <label className="nodrag nopan flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={Boolean(data.matchSourceSize)}
-              disabled={isGenerating}
-              onChange={(event) => updateNodeData(id, { matchSourceSize: event.target.checked })}
-            />
-            <span>Match source size (recommended with mask)</span>
-          </label>
-        ) : null}
-
         <details className="group bg-background/60 rounded-md border p-2 text-xs">
           <summary className="text-muted-foreground flex cursor-pointer list-none items-center gap-1 select-none [&::-webkit-details-marker]:hidden">
             <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
@@ -1466,89 +1576,6 @@ export function GenerateNode({ id, data, parentId, selected }: NodeProps<Generat
             />
           </div>
         </details>
-
-        <div className="flex flex-col gap-1">
-          <div className="flex min-h-7 items-center justify-between gap-2">
-            <span className="text-muted-foreground text-xs">Reference image</span>
-            {hasReferenceItems && (
-              <ConfirmDialog
-                title="Remove all references?"
-                description="This disconnects every connected reference and removes all dropped reference images from this Generate node."
-                confirmLabel="Remove all"
-                onConfirm={removeAllReferences}
-                trigger={
-                  <Button
-                    type="button"
-                    size="xs"
-                    variant="ghost"
-                    disabled={isGenerating}
-                    className="nodrag nopan text-destructive hover:text-destructive"
-                  >
-                    <Trash2 />
-                    Clear all
-                  </Button>
-                }
-              />
-            )}
-          </div>
-          <div
-            className="bg-background/60 flex min-h-14 flex-wrap gap-1 rounded-md border border-dashed p-1"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              if (isGenerating) return;
-              e.preventDefault();
-              const url = e.dataTransfer.getData("application/ica-image-url");
-              if (url) addReference(url);
-            }}
-          >
-            {hasReferenceItems ? (
-              <>
-                {renderedReferences}
-                {manualImageReferences.map((url) => (
-                  <div
-                    key={url}
-                    className="group/reference relative size-9 overflow-hidden rounded"
-                  >
-                    <ImagePreviewDialog
-                      src={url}
-                      alt="Dropped reference"
-                      title="Dropped reference image"
-                      trigger={
-                        <button
-                          type="button"
-                          className="nodrag nopan focus-visible:ring-ring size-full cursor-zoom-in outline-none focus-visible:ring-2 focus-visible:ring-inset"
-                          aria-label="Enlarge dropped reference image"
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={url} alt="" className="size-full object-cover" />
-                        </button>
-                      }
-                    />
-                    <ConfirmDialog
-                      title="Remove reference?"
-                      description="Remove this dropped image from the Generate node?"
-                      confirmLabel="Remove"
-                      onConfirm={() => removeReference(url)}
-                      trigger={
-                        <button
-                          type="button"
-                          aria-label="Remove reference"
-                          className="nodrag nopan bg-background/90 text-foreground focus-visible:ring-ring absolute top-0.5 right-0.5 z-10 flex size-5 items-center justify-center rounded-sm border opacity-0 shadow-sm transition-opacity group-hover/reference:opacity-100 focus-visible:opacity-100 focus-visible:ring-2"
-                        >
-                          <X className="size-3" />
-                        </button>
-                      }
-                    />
-                  </div>
-                ))}
-              </>
-            ) : (
-              <span className="text-muted-foreground px-1 py-1 text-xs">
-                Drop an image reference
-              </span>
-            )}
-          </div>
-        </div>
 
         <details className="group bg-background/60 rounded-md border p-2 text-xs">
           <summary className="text-muted-foreground flex cursor-pointer list-none items-center justify-between gap-2 select-none [&::-webkit-details-marker]:hidden">
@@ -1817,33 +1844,8 @@ export function GenerateNode({ id, data, parentId, selected }: NodeProps<Generat
           </div>
         </details>
 
-        <div className="grid gap-1">
-          <span className="text-muted-foreground text-xs">Prompt</span>
-          <AliasMentionTextarea
-            value={data.prompt}
-            disabled={isGenerating}
-            aliases={aliasOptions}
-            masks={promptReferences.flatMap((reference) =>
-              reference.masks.map((mask) => ({ nodeId: reference.nodeId, name: mask.name })),
-            )}
-            onChange={(prompt) => updateNodeData(id, { prompt })}
-          />
-          <span className="text-muted-foreground text-[0.65rem]">
-            Add context or refine the generated prompt here.
-          </span>
-        </div>
-
-        <div className="grid gap-1">
-          <details className="nodrag nopan bg-background/60 rounded-md border p-2 text-xs">
-            <summary className="text-muted-foreground cursor-pointer text-xs select-none">
-              Preview final prompt sent to model
-            </summary>
-            <pre className="bg-muted/40 mt-2 max-h-64 overflow-auto rounded p-2 text-[0.7rem] leading-5 break-words whitespace-pre-wrap">
-              {previewFinalPrompt || "(Connect a reference and enter a prompt to preview.)"}
-            </pre>
-          </details>
-        </div>
       </div>
+
 
       <div className="bg-card relative z-20 flex shrink-0 flex-col gap-1 border-t px-3 py-2">
         <ConfirmDialog

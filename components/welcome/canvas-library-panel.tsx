@@ -14,8 +14,13 @@ import { formatDate } from "@/lib/format";
 import { useCanvases, useDeleteCanvas } from "@/lib/hooks/use-canvases";
 import { getCanvasStore } from "@/lib/store";
 
-const LIBRARY_PROJECT_KEY = "canvas-library-project-id";
-const LIBRARY_PROJECT_NAME = "Canvas";
+// The standalone Canvas library keeps every canvas under a single shared
+// backing project so the same canvases appear on every origin (localhost, the
+// Vercel deploy, other machines) that uses the same account/database. The
+// project is resolved deterministically by name (NOT by a per-origin
+// localStorage id), otherwise each origin silently creates its own "Canvas"
+// project and canvases stop syncing between local and production.
+const LIBRARY_PROJECT_NAME = "quickcanvas";
 
 /**
  * Left-menu "Canvas → View / edit" panel. Presents a standalone canvas library
@@ -40,19 +45,22 @@ export function CanvasLibraryPanel({ isAdmin = true }: { isAdmin?: boolean }) {
   } = useCanvases(projectId ?? "");
   const del = useDeleteCanvas(projectId ?? "");
 
-  // Ensure a dedicated backing project exists, then reuse/persist its id so
-  // every open shows the same library. Reuses the quick-canvas pattern so it is
-  // safe under StrictMode (single resolution, retryable on failure).
+  // Resolve the shared backing project from the project database rather than a
+  // per-origin localStorage id. find-or-create by name (reusing the quick-canvas
+  // pattern) so every origin/account opening the library converges on the SAME
+  // project and canvases stay in sync between local and Vercel. Safe under
+  // StrictMode (single resolution, retryable on failure).
   async function ensureLibrary(force = false) {
     if (initRef.current && !force) return;
     initRef.current = true;
     try {
       const store = getCanvasStore();
-      const stored = window.localStorage.getItem(LIBRARY_PROJECT_KEY);
-      let project = stored != null ? await store.getProject(stored) : null;
+      const projects = await store.listProjects();
+      let project = projects.find(
+        (entry) => entry.name.trim().toLocaleLowerCase() === LIBRARY_PROJECT_NAME,
+      );
       if (!project) {
         project = await store.createProject({ name: LIBRARY_PROJECT_NAME });
-        window.localStorage.setItem(LIBRARY_PROJECT_KEY, project.id);
         void queryClient.invalidateQueries({ queryKey: ["projects"] });
       }
       setProjectId(project.id);
