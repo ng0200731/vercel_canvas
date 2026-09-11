@@ -65,7 +65,7 @@ describe("canvas node palette helpers", () => {
   it("creates a linked horizontal regular-user starter graph", () => {
     const first = createRegularUserCanvasContent();
     const second = createRegularUserCanvasContent();
-    expect(first.nodes.map((node) => node.type)).toEqual(["product", "generate", "imageOutput"]);
+    expect(first.nodes.map((node) => node.type)).toEqual(["imageInput", "generate", "imageOutput"]);
     expect(first.nodes.map((node) => node.position.y)).toEqual([0, 0, 0]);
     expect(first.nodes.map((node) => node.position.x)).toEqual([0, 320, 640]);
     expect(
