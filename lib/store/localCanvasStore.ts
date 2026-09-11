@@ -396,7 +396,7 @@ export const localCanvasStore: CanvasStore = {
       id: uid(),
       projectId: input.projectId,
       name: input.name.trim(),
-      content: EMPTY_CANVAS_CONTENT,
+      content: input.content ?? EMPTY_CANVAS_CONTENT,
       status: "draft",
       createdAt: nowISO(),
       updatedAt: nowISO(),

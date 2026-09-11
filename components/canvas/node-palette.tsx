@@ -18,8 +18,8 @@ import {
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ImageThumbnailStack } from "@/components/image-thumbnail-stack";
-import { PALETTE_DRAG_MIME_TYPE, serializePaletteDragPayload } from "@/lib/nodes/palette";
-import { NODE_META, PALETTE_NODE_TYPES } from "@/lib/nodes/registry";
+import { PALETTE_DRAG_MIME_TYPE, paletteEntries, serializePaletteDragPayload } from "@/lib/nodes/palette";
+import { NODE_META } from "@/lib/nodes/registry";
 import type { CanvasNode, NodeType } from "@/lib/nodes/types";
 import type { GenericNodeDefinition } from "@/lib/workspace-settings";
 import { useCanvasActions } from "./canvas-context";
@@ -67,6 +67,7 @@ export function NodePalette({
   genericNodeDefinitionsError,
   genericNodeDefinitionsErrorMessage,
   onAddGenericNode,
+  isAdmin = true,
 }: {
   nodes: CanvasNode[];
   onAdd: (type: NodeType) => void;
@@ -75,35 +76,37 @@ export function NodePalette({
   genericNodeDefinitionsError: boolean;
   genericNodeDefinitionsErrorMessage?: string | null;
   onAddGenericNode: (definition: GenericNodeDefinition) => void;
+  isAdmin?: boolean;
 }) {
   const { leaveGroupNode } = useCanvasActions();
   const groupNodes = nodes.filter((node) => node.type === "group");
+  const entries = paletteEntries(isAdmin);
 
   return (
     <aside className="bg-card flex min-h-0 w-44 shrink-0 flex-col gap-1.5 overflow-y-auto border-r p-3 shadow-sm">
       <span className="text-muted-foreground px-1 py-1 text-xs font-medium tracking-wide uppercase">
         Add node
       </span>
-      {PALETTE_NODE_TYPES.map((type) => {
-        const meta = NODE_META[type];
-        const Icon = ICONS[type];
+      {entries.map((entry) => {
+        const meta = NODE_META[entry.type];
+        const Icon = ICONS[entry.type];
         return (
           <button
-            key={type}
+            key={entry.type}
             type="button"
             draggable
             onDragStart={(e) => {
               e.dataTransfer.setData(
                 PALETTE_DRAG_MIME_TYPE,
-                serializePaletteDragPayload({ kind: "registered-node", type }),
+                serializePaletteDragPayload({ kind: "registered-node", type: entry.type }),
               );
               e.dataTransfer.effectAllowed = "move";
             }}
-            onClick={() => onAdd(type)}
+            onClick={() => onAdd(entry.type)}
             className="focus-visible:ring-ring bg-background hover:border-primary/30 hover:bg-accent/60 flex h-9 cursor-grab items-center gap-2 rounded-md border px-2 text-sm shadow-sm transition-colors outline-none focus-visible:ring-2 active:cursor-grabbing"
           >
             <Icon className="text-muted-foreground size-4 shrink-0" />
-            {meta.label}
+            {entry.label}
           </button>
         );
       })}

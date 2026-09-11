@@ -1,4 +1,5 @@
 import { CanvasEditor } from "@/components/canvas/canvas-editor";
+import { getCurrentAdminAccess } from "@/lib/admin";
 
 export default async function CanvasEditorPage({
   params,
@@ -6,5 +7,6 @@ export default async function CanvasEditorPage({
   params: Promise<{ id: string; canvasId: string }>;
 }) {
   const { id, canvasId } = await params;
-  return <CanvasEditor projectId={id} canvasId={canvasId} />;
+  const { isAdmin } = await getCurrentAdminAccess();
+  return <CanvasEditor projectId={id} canvasId={canvasId} isAdmin={isAdmin} />;
 }

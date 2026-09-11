@@ -19,16 +19,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCreateCanvas } from "@/lib/hooks/use-canvases";
+import { createRegularUserCanvasContent } from "@/lib/nodes/starter-canvas";
 import type { Canvas } from "@/lib/store";
 
 export function CreateCanvasDialog({
   projectId,
   redirectOnCreate = true,
   onCreated,
+  isAdmin = true,
 }: {
   projectId: string;
   redirectOnCreate?: boolean;
   onCreated?: (canvas: Canvas) => void;
+  isAdmin?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -39,7 +42,11 @@ export function CreateCanvasDialog({
     e.preventDefault();
     if (!name.trim()) return;
     try {
-      const canvas = await create.mutateAsync({ projectId, name });
+      const canvas = await create.mutateAsync({
+        projectId,
+        name,
+        ...(isAdmin ? {} : { content: createRegularUserCanvasContent() }),
+      });
       setOpen(false);
       setName("");
       toast.success("Canvas created");

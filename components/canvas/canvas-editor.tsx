@@ -893,11 +893,13 @@ function Editor({
   canvasId,
   embedded = false,
   onBack,
+  isAdmin = true,
 }: {
   projectId: string;
   canvasId: string;
   embedded?: boolean;
   onBack?: () => void;
+  isAdmin?: boolean;
 }) {
   const { data: canvas, isLoading } = useCanvas(canvasId);
   const { data: project } = useProject(projectId);
@@ -2494,6 +2496,7 @@ function Editor({
           <NodePalette
             nodes={nodes}
             onAdd={addNodeAtCenter}
+            isAdmin={isAdmin}
             genericNodeDefinitions={genericNodeDefinitions}
             genericNodeDefinitionsLoading={genericNodeDefinitionsQuery.isLoading}
             genericNodeDefinitionsError={genericNodeDefinitionsQuery.isError}
@@ -2580,15 +2583,17 @@ export function CanvasEditor({
   canvasId,
   embedded = false,
   onBack,
+  isAdmin = true,
 }: {
   projectId: string;
   canvasId: string;
   embedded?: boolean;
   onBack?: () => void;
+  isAdmin?: boolean;
 }) {
   return (
     <ReactFlowProvider>
-      <Editor projectId={projectId} canvasId={canvasId} embedded={embedded} onBack={onBack} />
+      <Editor projectId={projectId} canvasId={canvasId} embedded={embedded} onBack={onBack} isAdmin={isAdmin} />
     </ReactFlowProvider>
   );
 }

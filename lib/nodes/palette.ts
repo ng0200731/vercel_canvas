@@ -2,10 +2,44 @@ import { z } from "zod";
 
 import { genericNodeDefinitionSchema, type GenericNodeDefinition } from "@/lib/workspace-settings";
 
-import { createNode } from "./registry";
-import { NODE_TYPES, type CanvasNode } from "./types";
+import { createNode, NODE_META } from "./registry";
+import { NODE_TYPES, type CanvasNode, type NodeType } from "./types";
 
 export const PALETTE_DRAG_MIME_TYPE = "application/ica-node";
+
+export interface PaletteNodeEntry {
+  type: NodeType;
+  label: string;
+}
+
+const FULL_PALETTE_TYPES: NodeType[] = [
+  "imageInput",
+  "generate",
+  "imageOutput",
+  "suppler",
+  "product",
+  "action",
+  "pantone",
+  "g2",
+  "painted",
+];
+
+const REGULAR_PALETTE_TYPES: NodeType[] = [
+  "imageInput",
+  "product",
+  "suppler",
+  "pantone",
+  "generate",
+  "imageOutput",
+];
+
+export function paletteEntries(isAdmin: boolean): PaletteNodeEntry[] {
+  const types = isAdmin ? FULL_PALETTE_TYPES : REGULAR_PALETTE_TYPES;
+  return types.map((type) => ({
+    type,
+    label: !isAdmin && type === "product" ? "Customer" : NODE_META[type].label,
+  }));
+}
 
 const paletteDragPayloadSchema = z.discriminatedUnion("kind", [
   z

@@ -724,7 +724,7 @@ export function createSupabaseCanvasStore(): CanvasStore {
           project_id: input.projectId,
           user_id: userId,
           name: input.name.trim(),
-          content: EMPTY_CANVAS_CONTENT,
+          content: input.content ?? EMPTY_CANVAS_CONTENT,
           status: "draft",
         })
         .select(CANVAS_COLUMNS)
@@ -737,7 +737,7 @@ export function createSupabaseCanvasStore(): CanvasStore {
           project_id: input.projectId,
           user_id: userId,
           name: input.name.trim(),
-          content: EMPTY_CANVAS_CONTENT,
+          content: input.content ?? EMPTY_CANVAS_CONTENT,
         })
         .select(LEGACY_CANVAS_COLUMNS)
         .single();

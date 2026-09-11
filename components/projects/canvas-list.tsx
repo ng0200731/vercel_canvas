@@ -750,11 +750,13 @@ export function CanvasList({
   redirectOnCreate = true,
   onOpenCanvas,
   onCanvasCreated,
+  isAdmin = true,
 }: {
   projectId: string;
   redirectOnCreate?: boolean;
   onOpenCanvas?: (canvasId: string) => void;
   onCanvasCreated?: (canvasId: string) => void;
+  isAdmin?: boolean;
 }) {
   const { data: canvases, isLoading, isError, error } = useCanvases(projectId);
   const project = useProject(projectId);
@@ -811,6 +813,7 @@ export function CanvasList({
         </div>
         <CreateCanvasDialog
           projectId={projectId}
+          isAdmin={isAdmin}
           redirectOnCreate={redirectOnCreate}
           onCreated={(canvas) => onCanvasCreated?.(canvas.id)}
         />

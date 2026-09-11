@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 
 import { CanvasList } from "@/components/projects/canvas-list";
+import { getCurrentAdminAccess } from "@/lib/admin";
 import { ProjectHeader } from "@/components/projects/project-header";
 
 export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {

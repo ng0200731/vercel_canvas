@@ -512,10 +512,10 @@ export function createPostgresCanvasStore(): CanvasStore {
         `INSERT INTO public.canvases (project_id, user_id, name, content, status)
          VALUES ($1, $2, $3, $4::jsonb, 'draft')
          RETURNING id, project_id, name, content, status, created_at, updated_at`,
-        [input.projectId, localUserId, input.name.trim(), JSON.stringify(EMPTY_CANVAS_CONTENT)],
+        [input.projectId, localUserId, input.name.trim(), JSON.stringify(input.content ?? EMPTY_CANVAS_CONTENT)],
       );
       if (!row) throw new Error("Failed to create canvas");
-      return mapCanvas(row, EMPTY_CANVAS_CONTENT);
+      return mapCanvas(row, input.content ?? EMPTY_CANVAS_CONTENT);
     },
 
     async renameCanvas(id, name) {

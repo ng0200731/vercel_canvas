@@ -10,7 +10,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { type NodeProps } from "@xyflow/react";
-import { Loader2, Plus, Sparkles, Square, Trash2, X } from "lucide-react";
+import { ChevronRight, Loader2, Plus, Sparkles, Square, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -304,9 +304,7 @@ async function computeUnionMasksForReferences(
       const decoded = await Promise.all(urls.map((url) => fetchMaskBlob(url)));
       const decodedMasks = (
         await Promise.all(
-          decoded
-            .filter((blob): blob is Blob => Boolean(blob))
-            .map((blob) => decodeMaskPng(blob)),
+          decoded.filter((blob): blob is Blob => Boolean(blob)).map((blob) => decodeMaskPng(blob)),
         )
       ).filter((mask): mask is NonNullable<Awaited<ReturnType<typeof decodeMaskPng>>> =>
         Boolean(mask),
@@ -640,8 +638,7 @@ function AliasMentionTextarea({
             return;
           }
           const offset = caretOffsetFromPoint(event);
-          const nextHover =
-            offset === null ? null : aliasAtOffset(value, offset, aliases, masks);
+          const nextHover = offset === null ? null : aliasAtOffset(value, offset, aliases, masks);
           setHoveredReferenceNodeId(nextHover);
         }}
         onScroll={(event) => {
@@ -766,7 +763,11 @@ export function GenerateNode({ id, data, parentId, selected }: NodeProps<Generat
         nodeId: reference.nodeId,
         alias: reference.alias,
         imageUrl: reference.imageUrl,
-        masks: reference.masks.map((mask) => ({ id: mask.id, name: mask.name, maskUrl: mask.maskUrl })),
+        masks: reference.masks.map((mask) => ({
+          id: mask.id,
+          name: mask.name,
+          maskUrl: mask.maskUrl,
+        })),
       })),
     [connectedImageReferences],
   );
@@ -817,9 +818,7 @@ export function GenerateNode({ id, data, parentId, selected }: NodeProps<Generat
     .map((reference) =>
       toGenerationReference(
         reference,
-        reference.kind === "image"
-          ? selectedMaskUrlBySourceNode.get(reference.nodeId)
-          : undefined,
+        reference.kind === "image" ? selectedMaskUrlBySourceNode.get(reference.nodeId) : undefined,
       ),
     )
     .filter((reference): reference is ImageGenerationReference => reference !== null)
@@ -1112,8 +1111,7 @@ export function GenerateNode({ id, data, parentId, selected }: NodeProps<Generat
     });
     const generationStartedAt = nowMs();
     try {
-      const referencesWithUnionMask =
-        await computeUnionMasksForReferences(allGenerationReferences);
+      const referencesWithUnionMask = await computeUnionMasksForReferences(allGenerationReferences);
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1438,28 +1436,27 @@ export function GenerateNode({ id, data, parentId, selected }: NodeProps<Generat
               type="checkbox"
               checked={Boolean(data.matchSourceSize)}
               disabled={isGenerating}
-              onChange={(event) =>
-                updateNodeData(id, { matchSourceSize: event.target.checked })
-              }
+              onChange={(event) => updateNodeData(id, { matchSourceSize: event.target.checked })}
             />
-            <span>
-              Match source size (recommended with mask)
-            </span>
+            <span>Match source size (recommended with mask)</span>
           </label>
         ) : null}
 
-        <div className="flex flex-col gap-1">
-          <label className="text-muted-foreground text-xs">System prompt</label>
-          <textarea
-            value={systemPrompt}
-            disabled={isGenerating}
-            placeholder="Optional system prompt prepended to every request (e.g. brand voice, style guardrails)"
-            onChange={(event) =>
-              updateNodeData(id, { systemPrompt: event.target.value })
-            }
-            className="nodrag nopan caret-foreground placeholder:text-muted-foreground min-h-16 w-full resize-y rounded-md border bg-background/60 p-2 text-xs leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-          />
-        </div>
+        <details className="group bg-background/60 rounded-md border p-2 text-xs">
+          <summary className="text-muted-foreground flex cursor-pointer list-none items-center gap-1 select-none [&::-webkit-details-marker]:hidden">
+            <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
+            System prompt
+          </summary>
+          <div className="mt-2 flex flex-col gap-1">
+            <textarea
+              value={systemPrompt}
+              disabled={isGenerating}
+              placeholder="Optional system prompt prepended to every request (e.g. brand voice, style guardrails)"
+              onChange={(event) => updateNodeData(id, { systemPrompt: event.target.value })}
+              className="nodrag nopan caret-foreground placeholder:text-muted-foreground bg-background/60 focus-visible:ring-ring min-h-16 w-full resize-y rounded-md border p-2 text-xs leading-5 outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
+            />
+          </div>
+        </details>
 
         <div className="flex flex-col gap-1">
           <div className="flex min-h-7 items-center justify-between gap-2">
@@ -1544,260 +1541,272 @@ export function GenerateNode({ id, data, parentId, selected }: NodeProps<Generat
           </div>
         </div>
 
-        <div className="bg-background/60 grid gap-2 rounded-md border p-2">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-muted-foreground text-xs">Prompt program</span>
-            <Button
-              type="button"
-              size="xs"
-              variant="outline"
-              disabled={isGenerating}
-              className="nodrag nopan"
-              onClick={addPromptRow}
-            >
-              <Plus />
-              Add row
-            </Button>
-          </div>
-          <div className="grid gap-2">
-            {promptRows.map((row, index) => {
-              const sourceMasks = masksForPromptSource(promptReferences, row.sourceNodeId);
-              const selectedSourceReference = promptReferences.find(
-                (reference) => reference.nodeId === row.sourceNodeId,
-              );
-              const selectedMaskReference = sourceMasks.find((mask) => mask.id === row.maskId);
-              const preview = generatePromptRowText(row, promptReferences);
-              const rowState = generatePromptRowState(row, promptReferences);
-              const complete = rowState === "complete";
-              const rowInvalid = invalidPromptRows.has(row.id);
-              const missingFields = promptRowMissingFields(row);
+        <details className="group bg-background/60 rounded-md border p-2 text-xs">
+          <summary className="text-muted-foreground flex cursor-pointer list-none items-center justify-between gap-2 select-none [&::-webkit-details-marker]:hidden">
+            <span className="flex items-center gap-1">
+              <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
+              Prompt program
+              {promptRows.length > 1 ? (
+                <span className="text-muted-foreground bg-muted/60 rounded px-1 text-[0.6rem]">
+                  {promptRows.length}
+                </span>
+              ) : null}
+            </span>
+          </summary>
+          <div className="mt-2 flex flex-col gap-2">
+            <div className="flex items-center justify-end">
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                disabled={isGenerating}
+                className="nodrag nopan"
+                onClick={addPromptRow}
+              >
+                <Plus />
+                Add row
+              </Button>
+            </div>
+            <div className="grid gap-2">
+              {promptRows.map((row, index) => {
+                const sourceMasks = masksForPromptSource(promptReferences, row.sourceNodeId);
+                const selectedSourceReference = promptReferences.find(
+                  (reference) => reference.nodeId === row.sourceNodeId,
+                );
+                const selectedMaskReference = sourceMasks.find((mask) => mask.id === row.maskId);
+                const preview = generatePromptRowText(row, promptReferences);
+                const rowState = generatePromptRowState(row, promptReferences);
+                const complete = rowState === "complete";
+                const rowInvalid = invalidPromptRows.has(row.id);
+                const missingFields = promptRowMissingFields(row);
 
-              return (
-                <div
-                  key={row.id}
-                  className={cn(
-                    "bg-background grid gap-1 rounded-md border p-2",
-                    rowState === "partial" && "border-amber-400/70",
-                  )}
-                >
-                  <div className="grid grid-cols-[1fr_1fr_0.9fr_1fr_auto] gap-1">
-                    <Select
-                      value={row.sourceNodeId || "__source__"}
-                      disabled={isGenerating}
-                      onValueChange={(value) =>
-                        patchPromptRow(row.id, {
-                          sourceNodeId: value === "__source__" ? "" : (value ?? ""),
-                          maskId: "",
-                        })
-                      }
-                    >
-                      <SelectTrigger
-                        className={cn(
-                          "nodrag nopan h-8 px-2 text-xs",
-                          rowInvalid &&
-                            missingFields.includes("source") &&
-                            "border-destructive ring-destructive/40 ring-1",
-                        )}
-                        aria-label={`Prompt row ${index + 1} source alias`}
+                return (
+                  <div
+                    key={row.id}
+                    className={cn(
+                      "bg-background grid gap-1 rounded-md border p-2",
+                      rowState === "partial" && "border-amber-400/70",
+                    )}
+                  >
+                    <div className="grid grid-cols-[1fr_1fr_0.9fr_1fr_auto] gap-1">
+                      <Select
+                        value={row.sourceNodeId || "__source__"}
+                        disabled={isGenerating}
+                        onValueChange={(value) =>
+                          patchPromptRow(row.id, {
+                            sourceNodeId: value === "__source__" ? "" : (value ?? ""),
+                            maskId: "",
+                          })
+                        }
                       >
-                        <span
-                          data-slot="select-value"
+                        <SelectTrigger
                           className={cn(
-                            "flex flex-1 items-center truncate text-left",
-                            !selectedSourceReference && "text-muted-foreground",
+                            "nodrag nopan h-8 px-2 text-xs",
+                            rowInvalid &&
+                              missingFields.includes("source") &&
+                              "border-destructive ring-destructive/40 ring-1",
                           )}
+                          aria-label={`Prompt row ${index + 1} source alias`}
                         >
-                          {selectedSourceReference
-                            ? `@${selectedSourceReference.alias}`
-                            : "@source"}
-                        </span>
-                      </SelectTrigger>
-                      <SelectContent align="start" className="nodrag nopan">
-                        <SelectItem value="__source__">@source</SelectItem>
-                        {promptReferences.map((reference) => (
-                          <SelectItem key={reference.nodeId} value={reference.nodeId}>
-                            @{reference.alias}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Select
-                      value={row.maskId || "__mask__"}
-                      disabled={isGenerating || !row.sourceNodeId}
-                      onValueChange={(value) => {
-                        const nextValue = value ?? "__mask__";
-                        patchPromptRow(row.id, {
-                          maskId: nextValue === "__mask__" ? "" : nextValue,
-                        });
-                      }}
-                    >
-                      <SelectTrigger
-                        className={cn("nodrag nopan h-8 px-2 text-xs")}
-                        aria-label={`Prompt row ${index + 1} mask`}
+                          <span
+                            data-slot="select-value"
+                            className={cn(
+                              "flex flex-1 items-center truncate text-left",
+                              !selectedSourceReference && "text-muted-foreground",
+                            )}
+                          >
+                            {selectedSourceReference
+                              ? `@${selectedSourceReference.alias}`
+                              : "@source"}
+                          </span>
+                        </SelectTrigger>
+                        <SelectContent align="start" className="nodrag nopan">
+                          <SelectItem value="__source__">@source</SelectItem>
+                          {promptReferences.map((reference) => (
+                            <SelectItem key={reference.nodeId} value={reference.nodeId}>
+                              @{reference.alias}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Select
+                        value={row.maskId || "__mask__"}
+                        disabled={isGenerating || !row.sourceNodeId}
+                        onValueChange={(value) => {
+                          const nextValue = value ?? "__mask__";
+                          patchPromptRow(row.id, {
+                            maskId: nextValue === "__mask__" ? "" : nextValue,
+                          });
+                        }}
                       >
-                        <span
-                          data-slot="select-value"
-                          className={cn(
-                            "flex flex-1 items-center gap-1 truncate text-left",
-                            !selectedMaskReference && "text-muted-foreground",
-                          )}
+                        <SelectTrigger
+                          className={cn("nodrag nopan h-8 px-2 text-xs")}
+                          aria-label={`Prompt row ${index + 1} mask`}
                         >
-                          {selectedMaskReference?.name ??
-                            (row.sourceNodeId && sourceMasks.length === 0
-                              ? "No mask (optional)"
-                              : "mask (optional)")}
-                          {selectedMaskReference?.maskUrl ? (
-                            <span
-                              role="button"
-                              tabIndex={0}
-                              onPointerDown={(event: ReactMouseEvent<HTMLSpanElement>) => {
-                                event.stopPropagation();
-                                event.preventDefault();
-                                setMaskPreviewRowId(row.id);
-                              }}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                event.preventDefault();
-                              }}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter" || event.key === " ") {
+                          <span
+                            data-slot="select-value"
+                            className={cn(
+                              "flex flex-1 items-center gap-1 truncate text-left",
+                              !selectedMaskReference && "text-muted-foreground",
+                            )}
+                          >
+                            {selectedMaskReference?.name ??
+                              (row.sourceNodeId && sourceMasks.length === 0
+                                ? "No mask (optional)"
+                                : "mask (optional)")}
+                            {selectedMaskReference?.maskUrl ? (
+                              <span
+                                role="button"
+                                tabIndex={0}
+                                onPointerDown={(event: ReactMouseEvent<HTMLSpanElement>) => {
                                   event.stopPropagation();
                                   event.preventDefault();
                                   setMaskPreviewRowId(row.id);
-                                }
-                              }}
-                              className="nodrag nopan ml-1 cursor-pointer text-[10px] text-blue-400 hover:text-blue-300 underline"
-                              title="Open mask preview"
-                            >
-                              PNG
-                            </span>
-                          ) : null}
-                        </span>
-                      </SelectTrigger>
-                      <SelectContent align="start" className="nodrag nopan">
-                        <SelectItem value="__mask__">
-                          {row.sourceNodeId && sourceMasks.length === 0
-                            ? "No mask (optional)"
-                            : "mask (optional)"}
-                        </SelectItem>
-                        {sourceMasks.map((mask) => (
-                          <SelectItem key={mask.id} value={mask.id}>
-                            {mask.name}
+                                }}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  event.preventDefault();
+                                }}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.stopPropagation();
+                                    event.preventDefault();
+                                    setMaskPreviewRowId(row.id);
+                                  }
+                                }}
+                                className="nodrag nopan ml-1 cursor-pointer text-[10px] text-blue-400 underline hover:text-blue-300"
+                                title="Open mask preview"
+                              >
+                                PNG
+                              </span>
+                            ) : null}
+                          </span>
+                        </SelectTrigger>
+                        <SelectContent align="start" className="nodrag nopan">
+                          <SelectItem value="__mask__">
+                            {row.sourceNodeId && sourceMasks.length === 0
+                              ? "No mask (optional)"
+                              : "mask (optional)"}
                           </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Select
-                      value={row.changeType}
-                      disabled={isGenerating}
-                      onValueChange={(value) =>
-                        patchPromptRow(row.id, {
-                          changeType: GENERATE_CHANGE_TYPES.includes(value as GenerateChangeType)
-                            ? (value as GenerateChangeType)
-                            : "color",
-                        })
-                      }
-                    >
-                      <SelectTrigger
+                          {sourceMasks.map((mask) => (
+                            <SelectItem key={mask.id} value={mask.id}>
+                              {mask.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Select
+                        value={row.changeType}
+                        disabled={isGenerating}
+                        onValueChange={(value) =>
+                          patchPromptRow(row.id, {
+                            changeType: GENERATE_CHANGE_TYPES.includes(value as GenerateChangeType)
+                              ? (value as GenerateChangeType)
+                              : "color",
+                          })
+                        }
+                      >
+                        <SelectTrigger
+                          className={cn(
+                            "nodrag nopan h-8 px-2 text-xs",
+                            rowInvalid &&
+                              missingFields.includes("change") &&
+                              "border-destructive ring-destructive/40 ring-1",
+                          )}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent align="start" className="nodrag nopan">
+                          {GENERATE_CHANGE_TYPES.map((option) => (
+                            <SelectItem key={option} value={option}>
+                              {option}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <AliasMentionInput
+                        value={row.targetText}
+                        disabled={isGenerating}
+                        aliases={aliasOptions}
+                        ariaLabel={`Prompt row ${index + 1} target`}
                         className={cn(
-                          "nodrag nopan h-8 px-2 text-xs",
                           rowInvalid &&
-                            missingFields.includes("change") &&
+                            missingFields.includes("target") &&
                             "border-destructive ring-destructive/40 ring-1",
                         )}
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent align="start" className="nodrag nopan">
-                        {GENERATE_CHANGE_TYPES.map((option) => (
-                          <SelectItem key={option} value={option}>
-                            {option}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <AliasMentionInput
-                      value={row.targetText}
-                      disabled={isGenerating}
-                      aliases={aliasOptions}
-                      ariaLabel={`Prompt row ${index + 1} target`}
-                      className={cn(
-                        rowInvalid &&
-                          missingFields.includes("target") &&
-                          "border-destructive ring-destructive/40 ring-1",
-                      )}
-                      onChange={(targetText) => patchPromptRow(row.id, { targetText })}
-                    />
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant="ghost"
-                      disabled={isGenerating || (promptRows.length === 1 && rowState === "empty")}
-                      aria-label={`Delete prompt row ${index + 1}`}
-                      className="nodrag nopan size-8"
-                      onClick={() => deletePromptRow(row.id)}
-                    >
-                      <X className="size-3.5" />
-                    </Button>
-                  </div>
-                  <p
-                    className={cn(
-                      "truncate font-mono text-[0.65rem]",
-                      complete ? "text-foreground" : "text-muted-foreground",
-                    )}
-                    title={preview}
-                  >
-                    {preview || "@product use collar region change color to @pantone red"}
-                  </p>
-                  {selectedMaskReference?.maskUrl ? (
-                    <button
-                      type="button"
-                      onClick={() => setMaskPreviewRowId(row.id)}
-                      className="nodrag nopan relative block h-20 w-full overflow-hidden rounded-md border bg-muted cursor-zoom-in"
-                      title="Open mask preview"
-                    >
-                      {(() => {
-                        const sourceRef = selectedSourceReference?.nodeId
-                          ? connectedImageReferences.find(
-                              (reference) => reference.nodeId === selectedSourceReference.nodeId,
-                            )
-                          : undefined;
-                        return sourceRef?.imageUrl ? (
-                          <img
-                            src={sourceRef.imageUrl}
-                            alt="source"
-                            className="absolute inset-0 h-full w-full object-contain"
-                            draggable={false}
-                          />
-                        ) : null;
-                      })()}
-                      <img
-                        src={selectedMaskReference.maskUrl}
-                        alt={`Mask ${selectedMaskReference.name}`}
-                        className="absolute inset-0 h-full w-full object-contain opacity-40 mix-blend-multiply"
-                        draggable={false}
+                        onChange={(targetText) => patchPromptRow(row.id, { targetText })}
                       />
-                      <span className="absolute bottom-0.5 left-1 rounded bg-black/70 px-1 text-[0.6rem] text-white">
-                        mask: {selectedMaskReference.name} (shaded = region to change)
-                      </span>
-                    </button>
-                  ) : null}
-                  {rowState === "partial" ? (
-                    <p className="text-[0.65rem] text-amber-600 dark:text-amber-300">
-                      Complete the source and target to include this row. Mask is optional.
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant="ghost"
+                        disabled={isGenerating || (promptRows.length === 1 && rowState === "empty")}
+                        aria-label={`Delete prompt row ${index + 1}`}
+                        className="nodrag nopan size-8"
+                        onClick={() => deletePromptRow(row.id)}
+                      >
+                        <X className="size-3.5" />
+                      </Button>
+                    </div>
+                    <p
+                      className={cn(
+                        "truncate font-mono text-[0.65rem]",
+                        complete ? "text-foreground" : "text-muted-foreground",
+                      )}
+                      title={preview}
+                    >
+                      {preview || "@product use collar region change color to @pantone red"}
                     </p>
-                  ) : null}
-                  {rowInvalid ? (
-                    <p className="text-destructive text-[0.65rem]">
-                      Complete the highlighted field{missingFields.length === 1 ? "" : "s"} before
-                      adding another row.
-                    </p>
-                  ) : null}
-                </div>
-              );
-            })}
+                    {selectedMaskReference?.maskUrl ? (
+                      <button
+                        type="button"
+                        onClick={() => setMaskPreviewRowId(row.id)}
+                        className="nodrag nopan bg-muted relative block h-20 w-full cursor-zoom-in overflow-hidden rounded-md border"
+                        title="Open mask preview"
+                      >
+                        {(() => {
+                          const sourceRef = selectedSourceReference?.nodeId
+                            ? connectedImageReferences.find(
+                                (reference) => reference.nodeId === selectedSourceReference.nodeId,
+                              )
+                            : undefined;
+                          return sourceRef?.imageUrl ? (
+                            <img
+                              src={sourceRef.imageUrl}
+                              alt="source"
+                              className="absolute inset-0 h-full w-full object-contain"
+                              draggable={false}
+                            />
+                          ) : null;
+                        })()}
+                        <img
+                          src={selectedMaskReference.maskUrl}
+                          alt={`Mask ${selectedMaskReference.name}`}
+                          className="absolute inset-0 h-full w-full object-contain opacity-40 mix-blend-multiply"
+                          draggable={false}
+                        />
+                        <span className="absolute bottom-0.5 left-1 rounded bg-black/70 px-1 text-[0.6rem] text-white">
+                          mask: {selectedMaskReference.name} (shaded = region to change)
+                        </span>
+                      </button>
+                    ) : null}
+                    {rowState === "partial" ? (
+                      <p className="text-[0.65rem] text-amber-600 dark:text-amber-300">
+                        Complete the source and target to include this row. Mask is optional.
+                      </p>
+                    ) : null}
+                    {rowInvalid ? (
+                      <p className="text-destructive text-[0.65rem]">
+                        Complete the highlighted field{missingFields.length === 1 ? "" : "s"} before
+                        adding another row.
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        </details>
 
         <div className="grid gap-1">
           <span className="text-muted-foreground text-xs">Prompt</span>
@@ -1816,11 +1825,11 @@ export function GenerateNode({ id, data, parentId, selected }: NodeProps<Generat
         </div>
 
         <div className="grid gap-1">
-          <details className="nodrag nopan rounded-md border bg-background/60 p-2 text-xs">
-            <summary className="text-muted-foreground cursor-pointer select-none text-xs">
+          <details className="nodrag nopan bg-background/60 rounded-md border p-2 text-xs">
+            <summary className="text-muted-foreground cursor-pointer text-xs select-none">
               Preview final prompt sent to model
             </summary>
-            <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/40 p-2 text-[0.7rem] leading-5">
+            <pre className="bg-muted/40 mt-2 max-h-64 overflow-auto rounded p-2 text-[0.7rem] leading-5 break-words whitespace-pre-wrap">
               {previewFinalPrompt || "(Connect a reference and enter a prompt to preview.)"}
             </pre>
           </details>
@@ -1898,9 +1907,7 @@ export function GenerateNode({ id, data, parentId, selected }: NodeProps<Generat
       </div>
       <OutputPort color={NODE_PORT_COLORS.generate} />
       <ResizeHandle nodeId={id} width={width} height={height} minWidth={280} minHeight={400} />
-      {showLogOverlay ? (
-        <GenerateLogOverlay onClose={() => setShowLogOverlay(false)} />
-      ) : null}
+      {showLogOverlay ? <GenerateLogOverlay onClose={() => setShowLogOverlay(false)} /> : null}
       {(() => {
         if (!maskPreviewRowId) return null;
         const row = promptRows.find((r) => r.id === maskPreviewRowId);
@@ -2000,14 +2007,14 @@ function MaskPreviewOverlay({
       onClick={onClose}
     >
       <div
-        className="relative max-h-full max-w-3xl overflow-auto rounded-lg border bg-background p-3 shadow-xl"
+        className="bg-background relative max-h-full max-w-3xl overflow-auto rounded-lg border p-3 shadow-xl"
         onClick={(event) => event.stopPropagation()}
       >
         <button
           type="button"
           onClick={onClose}
           aria-label="Close mask preview"
-          className="absolute right-2 top-2 z-10 inline-flex size-8 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
+          className="absolute top-2 right-2 z-10 inline-flex size-8 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
         >
           <X className="size-4" />
         </button>
@@ -2016,7 +2023,7 @@ function MaskPreviewOverlay({
           <span className="text-muted-foreground text-xs">· {maskName}</span>
         </div>
         <div
-          className="relative w-full overflow-hidden rounded-md border bg-muted"
+          className="bg-muted relative w-full overflow-hidden rounded-md border"
           style={{ aspectRatio: aspect, maxHeight: "70vh", maxWidth: "100%" }}
         >
           {/* Mask highlight layer (bottom, full opacity so the yellow region reads). */}
@@ -2113,21 +2120,21 @@ function GenerateLogOverlay({ onClose }: { onClose: () => void }) {
       onClick={onClose}
     >
       <div
-        className="relative max-h-[85vh] max-w-4xl overflow-auto rounded-lg border bg-background p-3 shadow-xl"
+        className="bg-background relative max-h-[85vh] max-w-4xl overflow-auto rounded-lg border p-3 shadow-xl"
         onClick={(event) => event.stopPropagation()}
       >
         <button
           type="button"
           onClick={onClose}
           aria-label="Close generate log"
-          className="absolute right-2 top-2 z-10 inline-flex size-8 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
+          className="absolute top-2 right-2 z-10 inline-flex size-8 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
         >
           <X className="size-4" />
         </button>
         <button
           type="button"
           onClick={refresh}
-          className="nodrag nopan absolute right-12 top-2 z-10 inline-flex h-8 items-center rounded-full bg-black/60 px-3 text-xs text-white hover:bg-black/80"
+          className="nodrag nopan absolute top-2 right-12 z-10 inline-flex h-8 items-center rounded-full bg-black/60 px-3 text-xs text-white hover:bg-black/80"
         >
           Refresh
         </button>
@@ -2145,7 +2152,7 @@ function GenerateLogOverlay({ onClose }: { onClose: () => void }) {
           <textarea
             readOnly
             value={jsonText}
-            className="nodrag nopan h-[60vh] w-full resize-none rounded-md border bg-muted p-3 font-mono text-[0.7rem] leading-snug"
+            className="nodrag nopan bg-muted h-[60vh] w-full resize-none rounded-md border p-3 font-mono text-[0.7rem] leading-snug"
             onClick={(event) => event.currentTarget.select()}
           />
         )}

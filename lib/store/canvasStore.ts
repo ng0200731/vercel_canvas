@@ -73,6 +73,7 @@ export interface CreateProjectInput extends Partial<ProjectMetadata> {
 export interface CreateCanvasInput {
   projectId: string;
   name: string;
+  content?: CanvasContent;
 }
 
 export interface CreateCanvasSendInput {

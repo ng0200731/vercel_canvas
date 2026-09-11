@@ -191,6 +191,7 @@ function ProjectWorkspacePanel({
         canvasId={selectedCanvasId}
         embedded
         onBack={onBackToProjectDetail}
+        isAdmin={isAdmin}
       />
     );
   }
@@ -214,6 +215,7 @@ function ProjectWorkspacePanel({
           redirectOnCreate={false}
           onOpenCanvas={onOpenCanvas}
           onCanvasCreated={onOpenCanvas}
+          isAdmin={isAdmin}
         />
       </div>
     </div>
