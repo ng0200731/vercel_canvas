@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { GenericNodeDefinition } from "@/lib/workspace-settings";
 
 import { createNode } from "./registry";
+import { createRegularUserCanvasContent } from "./starter-canvas";
 import {
   createGenericPresetNode,
+  paletteEntries,
   parsePaletteDragPayload,
   serializePaletteDragPayload,
   sortGenericNodeDefinitions,
@@ -36,6 +38,62 @@ function genericDefinition(overrides: Partial<GenericNodeDefinition> = {}): Gene
 }
 
 describe("canvas node palette helpers", () => {
+  it("provides ordered role-specific palette entries", () => {
+    expect(paletteEntries(true).map((entry) => entry.type)).toEqual([
+      "imageInput",
+      "generate",
+      "imageOutput",
+      "suppler",
+      "product",
+      "action",
+      "pantone",
+      "g2",
+      "painted",
+    ]);
+    expect(paletteEntries(false).map((entry) => entry.type)).toEqual([
+      "imageInput",
+      "product",
+      "suppler",
+      "pantone",
+      "generate",
+      "imageOutput",
+    ]);
+    expect(paletteEntries(false).find((entry) => entry.type === "product")?.label).toBe("Customer");
+    expect(paletteEntries(true).find((entry) => entry.type === "product")?.label).toBe("Product");
+  });
+
+  it("creates a linked horizontal regular-user starter graph", () => {
+    const first = createRegularUserCanvasContent();
+    const second = createRegularUserCanvasContent();
+    expect(first.nodes.map((node) => node.type)).toEqual(["product", "generate", "imageOutput"]);
+    expect(first.nodes.map((node) => node.position.y)).toEqual([0, 0, 0]);
+    expect(first.nodes.map((node) => node.position.x)).toEqual([0, 320, 640]);
+    expect(
+      first.edges.map(({ source, target, sourceHandle, targetHandle }) => ({
+        source,
+        target,
+        sourceHandle,
+        targetHandle,
+      })),
+    ).toEqual([
+      {
+        source: first.nodes[0].id,
+        target: first.nodes[1].id,
+        sourceHandle: "right",
+        targetHandle: "left",
+      },
+      {
+        source: first.nodes[1].id,
+        target: first.nodes[2].id,
+        sourceHandle: "right",
+        targetHandle: "left",
+      },
+    ]);
+    expect(new Set(second.nodes.map((node) => node.id))).not.toEqual(
+      new Set(first.nodes.map((node) => node.id)),
+    );
+  });
+
   it("round-trips validated registered and generic drag payloads", () => {
     const registered = { kind: "registered-node", type: "pantone" } as const;
     const generic = { kind: "generic-preset", definitionId: "generic-1" } as const;

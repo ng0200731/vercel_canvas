@@ -7,6 +7,7 @@ import { ProjectHeader } from "@/components/projects/project-header";
 
 export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const { isAdmin } = await getCurrentAdminAccess();
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6 lg:px-8">
@@ -18,7 +19,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       </Link>
       <ProjectHeader projectId={id} />
       <div className="mt-8">
-        <CanvasList projectId={id} />
+        <CanvasList projectId={id} isAdmin={isAdmin} />
       </div>
     </main>
   );
