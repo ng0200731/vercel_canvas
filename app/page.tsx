@@ -5,6 +5,7 @@ import { DemoBanner } from "@/components/demo-banner";
 import { WorkspaceShell } from "@/components/welcome/workspace-shell";
 import { getCurrentAdminAccess } from "@/lib/admin";
 import { isSupabaseConfigured, isXiangsuConfigured } from "@/lib/env";
+import { getGenerationUsage } from "@/lib/generation-usage";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 
 export default async function Home() {
@@ -22,18 +23,10 @@ export default async function Home() {
     if (!user) redirect("/login");
     isAdmin = (await getCurrentAdminAccess()).isAdmin;
     if (user && !isAdmin) {
-      const [{ count }, { data: allowance }] = await Promise.all([
-        supabase
-          .from("generation_records")
-          .select("id", { count: "exact", head: true })
-          .eq("user_id", user.id),
-        supabase
-          .from("generation_allowance")
-          .select("generation_limit")
-          .eq("user_id", user.id)
-          .maybeSingle(),
-      ]);
-      generationsLeft = Math.max((allowance?.generation_limit ?? 10) - (count ?? 0), 0);
+      // Count via the authoritative service-role path (same as enforcement and
+      // the admin panel) so the header matches the real record.
+      const { remaining } = await getGenerationUsage(user.id);
+      generationsLeft = remaining;
     }
   }
 

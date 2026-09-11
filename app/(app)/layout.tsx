@@ -2,6 +2,7 @@ import { AppHeader } from "@/components/app-header";
 import { DemoBanner } from "@/components/demo-banner";
 import { getCurrentAdminAccess } from "@/lib/admin";
 import { isSupabaseConfigured } from "@/lib/env";
+import { getGenerationUsage } from "@/lib/generation-usage";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -17,18 +18,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     email = user?.email ?? null;
     isAdmin = (await getCurrentAdminAccess()).isAdmin;
     if (user && !isAdmin) {
-      const [{ count }, { data: allowance }] = await Promise.all([
-        supabase
-          .from("generation_records")
-          .select("id", { count: "exact", head: true })
-          .eq("user_id", user.id),
-        supabase
-          .from("generation_allowance")
-          .select("generation_limit")
-          .eq("user_id", user.id)
-          .maybeSingle(),
-      ]);
-      generationsLeft = Math.max((allowance?.generation_limit ?? 10) - (count ?? 0), 0);
+      // Count via the authoritative service-role path (same as enforcement and
+      // the admin panel) so the header matches the real record.
+      const { remaining } = await getGenerationUsage(user.id);
+      generationsLeft = remaining;
     }
   }
 

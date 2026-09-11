@@ -7,6 +7,29 @@ export type GenerationGuardResult =
   | { ok: true; userId: string; isAdmin: boolean }
   | { ok: false; status: 401 | 403 | 429; error: string; remaining?: number };
 
+/**
+ * Authoritative generation usage for a user, counted via the service-role
+ * client (bypasses RLS) — the same source the enforcement path and the admin
+ * panel use. The page header and enforcement share this so their numbers never
+ * diverge. A user with no allowance row yet defaults to the standard limit of 10.
+ */
+export async function getGenerationUsage(userId: string): Promise<{
+  used: number;
+  limit: number;
+  remaining: number;
+}> {
+  const service = getSupabaseServiceClient();
+  const [{ count, error: countError }, { data: allowance, error: allowanceError }] = await Promise.all([
+    service.from("generation_records").select("id", { count: "exact", head: true }).eq("user_id", userId),
+    service.from("generation_allowance").select("generation_limit").eq("user_id", userId).maybeSingle(),
+  ]);
+  if (countError) throw countError;
+  if (allowanceError) throw allowanceError;
+  const used = count ?? 0;
+  const limit = allowance?.generation_limit ?? 10;
+  return { used, limit, remaining: Math.max(limit - used, 0) };
+}
+
 export async function authorizeGeneration(): Promise<GenerationGuardResult> {
   const supabase = await getSupabaseServerClient();
   const {
@@ -25,15 +48,7 @@ export async function authorizeGeneration(): Promise<GenerationGuardResult> {
   }
   if (profile?.access_level === 3) return { ok: true, userId: user.id, isAdmin: true };
 
-  const service = getSupabaseServiceClient();
-  const [{ count, error: countError }, { data: allowance, error: allowanceError }] = await Promise.all([
-    service.from("generation_records").select("id", { count: "exact", head: true }).eq("user_id", user.id),
-    service.from("generation_allowance").select("generation_limit").eq("user_id", user.id).maybeSingle(),
-  ]);
-  if (countError) throw countError;
-  if (allowanceError) throw allowanceError;
-  const limit = allowance?.generation_limit ?? 10;
-  const remaining = Math.max(limit - (count ?? 0), 0);
+  const { remaining } = await getGenerationUsage(user.id);
   if (remaining === 0) {
     return { ok: false, status: 429, error: "Your lifetime generation allowance has been used up.", remaining: 0 };
   }
