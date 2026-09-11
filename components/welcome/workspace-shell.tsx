@@ -8,6 +8,7 @@ import {
   ClipboardList,
   FolderKanban,
   Layers3,
+  LayoutTemplate,
   Menu,
   PackageSearch,
   PanelLeftClose,
@@ -27,15 +28,24 @@ import { OrderedOptionSettingsPanel } from "@/components/settings/ordered-option
 import { SmtpSettingsPanel } from "@/components/settings/smtp-settings-panel";
 import { UserManagementPanel } from "@/components/settings/user-management-panel";
 import { EntityWorkspacePanel } from "@/components/welcome/entity-workspace-panel";
+import { QuickCanvasPanel } from "@/components/welcome/quick-canvas-panel";
 import { SampleStatusDashboard } from "@/components/sample-status/sample-status-dashboard";
 import { cn } from "@/lib/utils";
 
-type SectionId = "customer" | "product" | "supplier" | "project" | "sample-status" | "settings";
+type SectionId =
+  | "customer"
+  | "product"
+  | "supplier"
+  | "project"
+  | "canvas"
+  | "sample-status"
+  | "settings";
 type TabId =
   | "customer"
   | "product"
   | "supplier"
   | "project"
+  | "canvas"
   | "sample-status"
   | "smtp-settings"
   | "currency-settings"
@@ -104,6 +114,13 @@ const sections: MenuSection[] = [
     items: [{ label: "View / edit", tab: "project", mode: "records" }],
   },
   {
+    id: "canvas",
+    label: "Canvas",
+    icon: LayoutTemplate,
+    tab: "canvas",
+    items: [{ label: "View / edit", tab: "canvas" }],
+  },
+  {
     id: "sample-status",
     label: "Sample Status",
     icon: ClipboardList,
@@ -132,6 +149,7 @@ const tabLabels: Record<TabId, string> = {
   product: "Product +",
   supplier: "Supplier +",
   project: "Project",
+  canvas: "Canvas",
   "sample-status": "Sample Status",
   "smtp-settings": "SMTP Setting",
   "currency-settings": "Currency",
@@ -144,7 +162,13 @@ const tabLabels: Record<TabId, string> = {
 
 function sectionForTab(tabId: TabId): SectionId {
   if (tabId === "sample-status") return "sample-status";
-  if (tabId === "customer" || tabId === "product" || tabId === "supplier" || tabId === "project") {
+  if (
+    tabId === "customer" ||
+    tabId === "product" ||
+    tabId === "supplier" ||
+    tabId === "project" ||
+    tabId === "canvas"
+  ) {
     return tabId;
   }
   return "settings";
@@ -231,6 +255,7 @@ function renderTabContent({
   onOpenCanvasFromProject,
   onBackToProjects,
   onBackToProjectDetail,
+  onBackToQuickCanvas,
   entityMode,
   onEntityModeChange,
   entityFormVersion,
@@ -244,6 +269,7 @@ function renderTabContent({
   onOpenCanvasFromProject: (projectId: string, canvasId: string) => void;
   onBackToProjects: () => void;
   onBackToProjectDetail: () => void;
+  onBackToQuickCanvas: () => void;
   entityMode: WorkspaceMode;
   onEntityModeChange: (mode: WorkspaceMode) => void;
   entityFormVersion: number;
@@ -263,6 +289,7 @@ function renderTabContent({
       />
     );
   }
+  if (tabId === "canvas") return <QuickCanvasPanel onBack={onBackToQuickCanvas} isAdmin={isAdmin} />;
   if (tabId === "sample-status") return <SampleStatusDashboard />;
   if (tabId === "smtp-settings") return <SmtpSettingsPanel />;
   if (tabId === "currency-settings") return <OrderedOptionSettingsPanel kind="currency" />;
@@ -558,7 +585,7 @@ export function WorkspaceShell({
         <div
           className={cn(
             "min-h-0 flex-1",
-            activeTab === "project" && selectedCanvasId
+            (activeTab === "project" && selectedCanvasId) || activeTab === "canvas"
               ? "overflow-hidden p-0"
               : activeTab === "project"
                 ? "overflow-hidden p-6"
@@ -575,6 +602,7 @@ export function WorkspaceShell({
               onOpenCanvasFromProject: openCanvasFromProject,
               onBackToProjects: backToProjects,
               onBackToProjectDetail: () => setSelectedCanvasId(null),
+              onBackToQuickCanvas: () => closeTab("canvas"),
               entityMode,
               onEntityModeChange: setEntityMode,
               entityFormVersion,
