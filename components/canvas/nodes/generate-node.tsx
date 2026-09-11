@@ -1834,7 +1834,9 @@ export function GenerateNode({ id, data, parentId, selected }: NodeProps<Generat
             </pre>
           </details>
         </div>
+      </div>
 
+      <div className="bg-card relative z-20 flex shrink-0 flex-col gap-1 border-t px-3 py-2">
         <ConfirmDialog
           title={connectedOutputHasImage ? "Replace output image?" : "Generate image?"}
           description={
