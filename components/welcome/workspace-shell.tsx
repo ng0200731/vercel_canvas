@@ -28,7 +28,7 @@ import { OrderedOptionSettingsPanel } from "@/components/settings/ordered-option
 import { SmtpSettingsPanel } from "@/components/settings/smtp-settings-panel";
 import { UserManagementPanel } from "@/components/settings/user-management-panel";
 import { EntityWorkspacePanel } from "@/components/welcome/entity-workspace-panel";
-import { QuickCanvasPanel } from "@/components/welcome/quick-canvas-panel";
+import { CanvasLibraryPanel } from "@/components/welcome/canvas-library-panel";
 import { SampleStatusDashboard } from "@/components/sample-status/sample-status-dashboard";
 import { cn } from "@/lib/utils";
 
@@ -255,7 +255,6 @@ function renderTabContent({
   onOpenCanvasFromProject,
   onBackToProjects,
   onBackToProjectDetail,
-  onBackToQuickCanvas,
   entityMode,
   onEntityModeChange,
   entityFormVersion,
@@ -269,7 +268,6 @@ function renderTabContent({
   onOpenCanvasFromProject: (projectId: string, canvasId: string) => void;
   onBackToProjects: () => void;
   onBackToProjectDetail: () => void;
-  onBackToQuickCanvas: () => void;
   entityMode: WorkspaceMode;
   onEntityModeChange: (mode: WorkspaceMode) => void;
   entityFormVersion: number;
@@ -289,7 +287,7 @@ function renderTabContent({
       />
     );
   }
-  if (tabId === "canvas") return <QuickCanvasPanel onBack={onBackToQuickCanvas} isAdmin={isAdmin} />;
+  if (tabId === "canvas") return <CanvasLibraryPanel isAdmin={isAdmin} />;
   if (tabId === "sample-status") return <SampleStatusDashboard />;
   if (tabId === "smtp-settings") return <SmtpSettingsPanel />;
   if (tabId === "currency-settings") return <OrderedOptionSettingsPanel kind="currency" />;
@@ -602,7 +600,6 @@ export function WorkspaceShell({
               onOpenCanvasFromProject: openCanvasFromProject,
               onBackToProjects: backToProjects,
               onBackToProjectDetail: () => setSelectedCanvasId(null),
-              onBackToQuickCanvas: () => closeTab("canvas"),
               entityMode,
               onEntityModeChange: setEntityMode,
               entityFormVersion,

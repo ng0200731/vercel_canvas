@@ -724,8 +724,6 @@ export function GenerateNode({ id, data, parentId, selected }: NodeProps<Generat
   const [invalidPromptRows, setInvalidPromptRows] = useState<ReadonlySet<string>>(new Set());
   const [maskPreviewRowId, setMaskPreviewRowId] = useState<string | null>(null);
   const [showLogOverlay, setShowLogOverlay] = useState(false);
-  // Provider / Version / Resolution / Size / Format defaults to collapsed; user expands when needed.
-  const [modelSectionCollapsed, setModelSectionCollapsed] = useState(true);
   const width = data.width ?? DEFAULT_WIDTH;
   const height = data.height ?? DEFAULT_HEIGHT;
   useEffect(() => {
@@ -1221,29 +1219,18 @@ export function GenerateNode({ id, data, parentId, selected }: NodeProps<Generat
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-x-hidden overflow-y-auto p-3">
-        <div className="flex items-center justify-between">
-          <button
-            type="button"
-            onClick={() => setModelSectionCollapsed((collapsed) => !collapsed)}
-            aria-expanded={!modelSectionCollapsed}
-            className="nodrag nopan text-muted-foreground hover:text-foreground flex cursor-pointer items-center gap-1 text-xs select-none"
-          >
-            <ChevronRight
-              className={cn(
-                "size-3.5 transition-transform",
-                !modelSectionCollapsed && "rotate-90",
-              )}
-            />
-            Model settings
-          </button>
-          <span className="text-muted-foreground truncate font-mono text-[0.65rem]">
-            {selectedModel.officialName}
-            {provider === "gpt" ? " · output pinned to PNG" : null}
-          </span>
-        </div>
-
-        {!modelSectionCollapsed ? (
-          <>
+        <details className="group bg-background/60 rounded-md border p-2 text-xs">
+          <summary className="text-muted-foreground flex cursor-pointer list-none items-center justify-between gap-2 select-none [&::-webkit-details-marker]:hidden">
+            <span className="flex items-center gap-1">
+              <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
+              Model settings
+            </span>
+            <span className="truncate font-mono text-[0.65rem]">
+              {selectedModel.officialName}
+              {provider === "gpt" ? " · output pinned to PNG" : null}
+            </span>
+          </summary>
+          <div className="mt-2 flex flex-col gap-2">
             <div className="grid grid-cols-2 gap-2">
           <div className="flex min-w-0 flex-col gap-1">
             <span className="text-muted-foreground text-xs">Provider</span>
@@ -1448,9 +1435,9 @@ export function GenerateNode({ id, data, parentId, selected }: NodeProps<Generat
               </SelectContent>
             </Select>
           </div>
-        </div>
-          </>
-        ) : null}
+          </div>
+          </div>
+        </details>
 
         {hasGenerationReferences && hasMaskAttached ? (
           <label className="nodrag nopan flex items-center gap-2 text-xs">
