@@ -332,15 +332,23 @@ export function WorkspaceShell({
   isSupabaseConfigured,
   isImageGenerationConfigured,
   isAdmin,
+  initialTab,
 }: {
   isSupabaseConfigured: boolean;
   isImageGenerationConfigured: boolean;
   isAdmin?: boolean;
+  initialTab?: TabId;
 }) {
-  const [expanded, setExpanded] = useState<SectionId | null>(null);
-  const [activeSection, setActiveSection] = useState<SectionId | null>(null);
-  const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
-  const [activeTab, setActiveTab] = useState<TabId | null>(null);
+  const [expanded, setExpanded] = useState<SectionId | null>(
+    initialTab ? sectionForTab(initialTab) : null,
+  );
+  const [activeSection, setActiveSection] = useState<SectionId | null>(
+    initialTab ? sectionForTab(initialTab) : null,
+  );
+  const [tabs, setTabs] = useState<WorkspaceTab[]>(
+    initialTab ? [{ id: initialTab, label: tabLabels[initialTab] }] : [],
+  );
+  const [activeTab, setActiveTab] = useState<TabId | null>(initialTab ?? null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedCanvasId, setSelectedCanvasId] = useState<string | null>(null);
   const [isMenuCollapsed, setIsMenuCollapsed] = useState(false);

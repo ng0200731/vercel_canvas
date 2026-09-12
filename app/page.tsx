@@ -11,6 +11,7 @@ import { getSupabaseServerClient } from "@/lib/supabase/server";
 export default async function Home() {
   let email: string | null = null;
   let isAdmin = false;
+  let accessLevel: 1 | 3 | null = null;
   let generationsLeft: number | null = null;
 
   if (isSupabaseConfigured) {
@@ -21,7 +22,9 @@ export default async function Home() {
 
     email = user?.email ?? null;
     if (!user) redirect("/login");
-    isAdmin = (await getCurrentAdminAccess()).isAdmin;
+    const { isAdmin: adminAccess, accessLevel: level } = await getCurrentAdminAccess();
+    isAdmin = adminAccess;
+    accessLevel = level;
     if (user && !isAdmin) {
       // Count via the authoritative service-role path (same as enforcement and
       // the admin panel) so the header matches the real record.
@@ -44,6 +47,7 @@ export default async function Home() {
           isSupabaseConfigured={isSupabaseConfigured}
           isImageGenerationConfigured={isXiangsuConfigured}
           isAdmin={isAdmin}
+          initialTab={accessLevel === 1 ? "canvas" : undefined}
         />
       </div>
     </div>
