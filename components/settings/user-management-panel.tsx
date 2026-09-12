@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   ChevronDown,
+  Copy,
   Gauge,
   KeyRound,
   Mail,
@@ -87,6 +88,12 @@ export function UserManagementPanel() {
   const [editing, setEditing] = useState<{ user: ManagedUser; kind: "limit" | "password" } | null>(null);
   const [allowanceInput, setAllowanceInput] = useState("");
   const [directPasswordInput, setDirectPasswordInput] = useState("");
+  const [createdCredential, setCreatedCredential] = useState<{
+    link: string;
+    email: string;
+    password: string;
+    copied: boolean;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -167,12 +174,45 @@ export function UserManagementPanel() {
     }
   }
 
+  async function copyText(text: string): Promise<boolean> {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      try {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        const ok = document.execCommand("copy");
+        document.body.removeChild(textarea);
+        return ok;
+      } catch {
+        return false;
+      }
+    }
+  }
+
   async function createAccount(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setBusy({ id: "new", action: "create" });
     try {
       const result = await createUser(newEmail, newPassword, newDisplayName);
-      toast.success(`${result.email} created — ready to sign in.`);
+      // Capture the credentials BEFORE clearing the form fields, then copy the
+      // register link + email + password so the admin can paste them elsewhere.
+      const email = newEmail;
+      const password = newPassword;
+      const link = `${window.location.origin}/login`;
+      const block = `Register link\n${link}\n\nEmail\n${email}\n\nPassword\n${password}`;
+      const copied = await copyText(block);
+      setCreatedCredential({ link, email, password, copied });
+      toast.success(
+        copied
+          ? `${result.email} created — credentials copied, ready to paste.`
+          : `${result.email} created — ready to sign in.`,
+      );
       setNewEmail("");
       setNewPassword("");
       setNewDisplayName("");
@@ -629,6 +669,58 @@ export function UserManagementPanel() {
             </form>
           </DialogContent>
         ) : null}
+      </Dialog>
+    <Dialog
+        open={createdCredential !== null}
+        onOpenChange={(open) => !open && setCreatedCredential(null)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{createdCredential?.copied ? "Credentials copied" : "Account created"}</DialogTitle>
+            <DialogDescription>
+              {createdCredential?.copied
+                ? "The register link and credentials were copied to your clipboard — paste them wherever you share logins."
+                : "The account was created, but the clipboard was not available. Copy the details below."}
+            </DialogDescription>
+          </DialogHeader>
+          {createdCredential ? (
+            <div className="my-2 grid gap-2.5">
+              <div className="bg-muted/40 flex flex-col gap-0.5 rounded-md border p-3">
+                <span className="text-muted-foreground text-xs font-medium">Register link</span>
+                <span className="text-sm break-all">{createdCredential.link}</span>
+              </div>
+              <div className="bg-muted/40 flex flex-col gap-0.5 rounded-md border p-3">
+                <span className="text-muted-foreground text-xs font-medium">Email</span>
+                <span className="text-sm break-all">{createdCredential.email}</span>
+              </div>
+              <div className="bg-muted/40 flex flex-col gap-0.5 rounded-md border p-3">
+                <span className="text-muted-foreground text-xs font-medium">Password</span>
+                <span className="text-sm break-all">{createdCredential.password}</span>
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setCreatedCredential(null)}>
+              Close
+            </Button>
+            <Button
+              type="button"
+              disabled={!createdCredential}
+              onClick={() => {
+                if (!createdCredential) return;
+                void copyText(
+                  `Register link\n${createdCredential.link}\n\nEmail\n${createdCredential.email}\n\nPassword\n${createdCredential.password}`,
+                ).then(() => {
+                  setCreatedCredential((current) => (current ? { ...current, copied: true } : current));
+                  toast.success("Credentials copied.");
+                });
+              }}
+            >
+              <Copy />
+              Copy again
+            </Button>
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
     </div>
   );
