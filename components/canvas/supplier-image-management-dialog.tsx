@@ -7,7 +7,9 @@ import {
   useState,
   type ClipboardEvent,
   type DragEvent,
+  type PointerEvent,
   type ReactElement,
+  type WheelEvent,
 } from "react";
 import {
   AlertCircle,
@@ -18,7 +20,10 @@ import {
   Globe,
   Images,
   LoaderCircle,
+  Minus,
+  Plus,
   RefreshCw,
+  RotateCcw,
   Shapes,
   ShieldCheck,
   Sparkles,
@@ -164,6 +169,168 @@ function buildComparisonFields(item: ProductImageGalleryItem): ComparisonField[]
       ),
     },
   ];
+}
+
+const COMPARISON_MIN_ZOOM = 1;
+const COMPARISON_MAX_ZOOM = 5;
+const COMPARISON_ZOOM_STEP = 0.2;
+
+type ComparisonPan = { x: number; y: number };
+type ComparisonDrag = {
+  pointerId: number;
+  start: { x: number; y: number };
+  origin: ComparisonPan;
+};
+
+function clampComparisonZoom(value: number): number {
+  return Math.min(COMPARISON_MAX_ZOOM, Math.max(COMPARISON_MIN_ZOOM, value));
+}
+
+function ComparisonImage({
+  src,
+  alt,
+  enabled,
+}: {
+  src: string;
+  alt: string;
+  enabled: boolean;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<ComparisonDrag | null>(null);
+  const [zoom, setZoom] = useState(COMPARISON_MIN_ZOOM);
+  const [pan, setPan] = useState<ComparisonPan>({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+
+  function resetZoom() {
+    setZoom(COMPARISON_MIN_ZOOM);
+    setPan({ x: 0, y: 0 });
+    setIsPanning(false);
+    dragRef.current = null;
+  }
+
+  function updateZoom(direction: 1 | -1) {
+    setZoom((current) => {
+      const next = clampComparisonZoom(
+        Number((current + direction * COMPARISON_ZOOM_STEP).toFixed(2)),
+      );
+      if (next === COMPARISON_MIN_ZOOM) setPan({ x: 0, y: 0 });
+      return next;
+    });
+  }
+
+  function handleWheel(event: WheelEvent<HTMLDivElement>) {
+    if (!enabled) return;
+    event.preventDefault();
+    updateZoom(event.deltaY < 0 ? 1 : -1);
+  }
+
+  function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
+    if (!enabled || zoom <= COMPARISON_MIN_ZOOM) return;
+    if (event.target instanceof Element && event.target.closest("button")) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    dragRef.current = {
+      pointerId: event.pointerId,
+      start: { x: event.clientX, y: event.clientY },
+      origin: pan,
+    };
+    setIsPanning(true);
+  }
+
+  function handlePointerMove(event: PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setPan({
+      x: drag.origin.x + event.clientX - drag.start.x,
+      y: drag.origin.y + event.clientY - drag.start.y,
+    });
+  }
+
+  function stopPanning(event: PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (drag?.pointerId !== event.pointerId) return;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    dragRef.current = null;
+    setIsPanning(false);
+  }
+
+  return (
+    <div className="grid min-h-0 gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-muted-foreground text-xs">
+          {enabled ? "Scroll to zoom · Drag to pan" : ""}
+        </p>
+        {enabled ? (
+          <div className="flex items-center gap-1" aria-label="Compared image zoom controls">
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="outline"
+              aria-label="Zoom out"
+              title="Zoom out"
+              disabled={zoom <= COMPARISON_MIN_ZOOM}
+              onClick={() => updateZoom(-1)}
+            >
+              <Minus />
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              aria-label={`Reset zoom to 100 percent; current zoom ${Math.round(zoom * 100)} percent`}
+              title="Reset zoom to 100%"
+              onClick={resetZoom}
+              data-testid="comparison-zoom-reset"
+              className="min-w-16 font-mono tabular-nums"
+            >
+              <RotateCcw />
+              {Math.round(zoom * 100)}%
+            </Button>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="outline"
+              aria-label="Zoom in"
+              title="Zoom in"
+              disabled={zoom >= COMPARISON_MAX_ZOOM}
+              onClick={() => updateZoom(1)}
+            >
+              <Plus />
+            </Button>
+          </div>
+        ) : null}
+      </div>
+      <div
+        ref={containerRef}
+        className={cn(
+          "bg-background relative min-h-[18rem] overflow-hidden rounded-lg border touch-none",
+          enabled && zoom > COMPARISON_MIN_ZOOM && (isPanning ? "cursor-grabbing" : "cursor-grab"),
+        )}
+        onWheel={enabled ? handleWheel : undefined}
+        onPointerDown={enabled ? handlePointerDown : undefined}
+        onPointerMove={enabled ? handlePointerMove : undefined}
+        onPointerUp={enabled ? stopPanning : undefined}
+        onPointerCancel={enabled ? stopPanning : undefined}
+        data-testid={enabled ? "compared-image-zoom" : undefined}
+        aria-label={enabled ? `${alt}, zoomable and pannable image` : alt}
+      >
+        {src ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={src}
+            alt={alt}
+            draggable={false}
+            className="h-full w-full select-none object-contain"
+            style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
+          />
+        ) : (
+          <div className="text-muted-foreground grid h-full place-items-center p-4 text-center text-sm">
+            No image available
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function SimilarityMeter({ value }: { value: number }) {
@@ -1351,20 +1518,12 @@ export function SupplierImageManagementDialog({
                         ) : null}
                       </div>
                       <div className="grid min-h-0 flex-1 gap-4 p-4">
-                        <div className="bg-background min-h-[18rem] overflow-hidden rounded-lg border">
-                          {panel.src ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={panel.src}
-                              alt={panel.alt}
-                              className="h-full w-full object-contain"
-                            />
-                          ) : (
-                            <div className="text-muted-foreground grid h-full place-items-center p-4 text-center text-sm">
-                              No image available
-                            </div>
-                          )}
-                        </div>
+                        <ComparisonImage
+                          key={`${panel.title}-${panel.src}`}
+                          src={panel.src}
+                          alt={panel.alt}
+                          enabled={panel.title === "Compared image"}
+                        />
                         {panel.fields.length ? (
                           <dl className="grid grid-cols-2 gap-2">
                             {panel.fields.map((field) => (
