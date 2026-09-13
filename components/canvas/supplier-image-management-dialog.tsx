@@ -12,14 +12,19 @@ import {
 import {
   AlertCircle,
   Check,
+  ChevronDown,
+  Database,
   Eye,
+  Globe,
   Images,
   LoaderCircle,
   RefreshCw,
+  Shapes,
   ShieldCheck,
   Sparkles,
   Upload,
   X,
+  Zap,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +37,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSupplierImageMatch } from "@/lib/hooks/use-supplier-image-match";
@@ -42,6 +55,7 @@ import {
 import {
   MAX_SUPPLIER_MATCH_CATALOG_IMAGES,
   SUPPLIER_MATCH_ELAND_MODEL,
+  SUPPLIER_MATCH_ENGINES,
   SUPPLIER_MATCH_GEMINI_MODEL,
   SUPPLIER_MATCH_LOCAL_MODEL,
   SUPPLIER_MATCH_LABELSTASH_MODEL,
@@ -75,6 +89,8 @@ interface SupplierImageManagementDialogProps {
   engine?: SupplierMatchEngine;
   trigger: ReactElement;
   onSelect: (item: ProductImageGalleryItem) => void;
+  /** Called when the user switches the search engine from the header dropdown. */
+  onEngineChange?: (engine: SupplierMatchEngine) => void;
 }
 
 interface RankedMatch {
@@ -189,6 +205,44 @@ function matchEngineLabel(model: string): string {
     return "Gemini embedding-2 (cosine)";
   }
   return model;
+}
+
+function engineMenuLabel(engine: SupplierMatchEngine): string {
+  switch (engine) {
+    case "picture-sherlock":
+      return "Picture Sherlock";
+    case "milvus":
+      return "Milvus";
+    case "local":
+      return "Local";
+    case "labelstash":
+      return "LabelStash";
+    case "eland":
+      return "the-eland.co";
+    case "gemini":
+      return "Gemini";
+  }
+}
+
+function engineMenuIcon(engine: SupplierMatchEngine) {
+  switch (engine) {
+    case "picture-sherlock":
+      return <Eye />;
+    case "milvus":
+      return <Database />;
+    case "local":
+      return <Zap />;
+    case "labelstash":
+      return <Shapes />;
+    case "eland":
+      return <Globe />;
+    case "gemini":
+      return (
+        <span aria-hidden className="grid size-4 place-items-center text-center text-[0.7rem] font-bold leading-none">
+          G
+        </span>
+      );
+  }
 }
 
 function confidenceLabel(cosine: number): { label: string; className: string } {
@@ -459,13 +513,16 @@ export function SupplierImageManagementDialog({
   catalogError = null,
   currentSupplierId = null,
   selectedItemId = null,
-  engine = "picture-sherlock",
+  engine: engineProp = "picture-sherlock",
   trigger,
   onSelect,
+  onEngineChange,
 }: SupplierImageManagementDialogProps) {
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
+  const [activeEngine, setActiveEngine] = useState<SupplierMatchEngine>(engineProp);
+  const engine = activeEngine;
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -475,6 +532,19 @@ export function SupplierImageManagementDialog({
   const [applyError, setApplyError] = useState<string | null>(null);
   const matchMutation = useSupplierImageMatch();
   const upsertProduct = useUpsertProduct();
+
+  function changeEngine(nextEngine: SupplierMatchEngine) {
+    if (nextEngine === activeEngine) return;
+    setActiveEngine(nextEngine);
+    onEngineChange?.(nextEngine);
+    // Results, query image, and any compare/apply state are engine-specific;
+    // clear them so the newly chosen engine starts from a clean slate.
+    matchMutation.reset();
+    setComparisonMatchId(null);
+    setQueryImage(null);
+    setUploadError(null);
+    setApplyError(null);
+  }
 
   const supplierById = useMemo(
     () => new Map(suppliers.map((supplier) => [supplier.id, supplier])),
@@ -853,6 +923,42 @@ export function SupplierImageManagementDialog({
                       : "Upload a reference image. Search only the selected supplier's product images and rank matches from highest to lowest similarity."}
           </DialogDescription>
         </DialogHeader>
+
+        {/* Engine switcher — top-right, just below the dialog close button. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                aria-label="Change image search engine"
+                title="Change image search engine"
+                className="absolute top-12 right-2 z-10"
+              >
+                {engineMenuIcon(engine)}
+                <span className="hidden sm:inline">{engineMenuLabel(engine)}</span>
+                <ChevronDown />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Image search engine</DropdownMenuLabel>
+              {SUPPLIER_MATCH_ENGINES.map((option) => (
+                <DropdownMenuItem
+                  key={option}
+                  onClick={() => changeEngine(option)}
+                  className={option === engine ? "bg-muted" : undefined}
+                >
+                  {engineMenuIcon(option)}
+                  <span>{engineMenuLabel(option)}</span>
+                  {option === engine ? <Check className="ml-auto" /> : null}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <div className="relative grid min-h-0 lg:grid-cols-[minmax(19rem,0.34fr)_minmax(0,1fr)]">
           <aside className="bg-muted/25 flex min-h-0 flex-col gap-4 overflow-y-auto border-b p-5 lg:border-r lg:border-b-0">
