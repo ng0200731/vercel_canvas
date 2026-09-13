@@ -26,6 +26,7 @@ const METHODS = new Set<string>([
   "listSuppliers",
   "upsertSupplier",
   "deleteSuppliers",
+  "setSupplierShared",
   "listProducts",
   "upsertProduct",
   "deleteProducts",

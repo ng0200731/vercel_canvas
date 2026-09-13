@@ -48,6 +48,8 @@ export const remotePostgresWorkspaceRecordStore: WorkspaceRecordStore = {
   upsertSupplier: (id: string | null, input: SupplierRecordInput) =>
     callLocalWorkspaceStore<SupplierRecord>("upsertSupplier", [id, input]),
   deleteSuppliers: (ids: string[]) => callLocalWorkspaceStore<void>("deleteSuppliers", [ids]),
+  setSupplierShared: (id: string, shared: boolean) =>
+    callLocalWorkspaceStore<void>("setSupplierShared", [id, shared]),
   listProducts: () => callLocalWorkspaceStore<ProductRecord[]>("listProducts"),
   upsertProduct: (id: string | null, input: ProductRecordInput) =>
     callLocalWorkspaceStore<ProductRecord>("upsertProduct", [id, input]),

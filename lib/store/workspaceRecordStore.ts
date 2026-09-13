@@ -19,6 +19,8 @@ export interface WorkspaceRecordStore {
   listSuppliers(): Promise<SupplierRecord[]>;
   upsertSupplier(id: string | null, input: SupplierRecordInput): Promise<SupplierRecord>;
   deleteSuppliers(ids: string[]): Promise<void>;
+  /** Set the admin-only visibility toggle on a supplier (shared to all users). */
+  setSupplierShared(id: string, shared: boolean): Promise<void>;
   listProducts(): Promise<ProductRecord[]>;
   upsertProduct(id: string | null, input: ProductRecordInput): Promise<ProductRecord>;
   deleteProducts(ids: string[]): Promise<void>;

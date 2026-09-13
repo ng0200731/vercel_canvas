@@ -102,6 +102,59 @@ describe("localWorkspaceRecordStore", () => {
     expect(records[0].company.productTypes).toEqual(["woven-label", "metal"]);
   });
 
+  it("defaults new suppliers to not shared, preserves it on edit, and toggles it", async () => {
+    const created = await localWorkspaceRecordStore.upsertSupplier(null, {
+      company: {
+        companyName: "Toggle Trim",
+        emailDomainSuffix: "toggletrim.com",
+        productTypes: ["button"],
+      },
+      employees: [
+        {
+          id: "employee-1",
+          userName: "Pat",
+          emailPrefix: "pat",
+          title: "Sales",
+          tel: "+1 555 0003",
+        },
+      ],
+    });
+    expect(created.isShared).toBe(false);
+
+    // Editing the supplier keeps the default OFF.
+    const edited = await localWorkspaceRecordStore.upsertSupplier(created.id, {
+      company: {
+        companyName: "Toggle Trim Ltd",
+        emailDomainSuffix: "toggletrim.com",
+        productTypes: ["button"],
+      },
+      employees: created.employees,
+    });
+    expect(edited.isShared).toBe(false);
+
+    // Toggle ON, then confirm the list reflects it.
+    await localWorkspaceRecordStore.setSupplierShared(created.id, true);
+    let records = await localWorkspaceRecordStore.listSuppliers();
+    expect(records.find((record) => record.id === created.id)?.isShared).toBe(true);
+
+    // Editing again after sharing preserves the ON state.
+    await localWorkspaceRecordStore.upsertSupplier(created.id, {
+      company: {
+        companyName: "Toggle Trim Ltd",
+        emailDomainSuffix: "toggletrim.com",
+        productTypes: ["button"],
+      },
+      employees: created.employees,
+    });
+    records = await localWorkspaceRecordStore.listSuppliers();
+    expect(records.find((record) => record.id === created.id)?.isShared).toBe(true);
+
+    // Toggle OFF.
+    await localWorkspaceRecordStore.setSupplierShared(created.id, false);
+    records = await localWorkspaceRecordStore.listSuppliers();
+    expect(records.find((record) => record.id === created.id)?.isShared).toBe(false);
+  });
+
   it("creates and updates product records with variants", async () => {
     const created = await localWorkspaceRecordStore.upsertProduct(null, {
       supplierId: "supplier-1",

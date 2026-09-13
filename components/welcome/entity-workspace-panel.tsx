@@ -80,6 +80,7 @@ import {
   useSuppliers,
   useDeleteSuppliers,
   useDeleteProducts,
+  useSetSupplierShared,
   useUpsertCustomer,
   useUpsertProduct,
   useUpsertSupplier,
@@ -88,7 +89,9 @@ import type { ProductImageGalleryItem } from "@/lib/product-image-gallery";
 import { productRecordSearchText } from "@/lib/product-image-gallery";
 import { uploadImage } from "@/lib/upload";
 import { useAdminCreators, type CreatorInfo } from "@/lib/hooks/use-admin-creators";
+import { useCurrentUserId } from "@/lib/hooks/use-current-user";
 import { CreatorCell } from "@/components/creator-cell";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
 type EntityKind = "customer" | "supplier" | "product";
@@ -1806,6 +1809,8 @@ function PartyWorkspacePanel({
   const upsertProduct = useUpsertProduct();
   const deleteSuppliers = useDeleteSuppliers();
   const deleteProducts = useDeleteProducts();
+  const setSupplierShared = useSetSupplierShared();
+  const currentUserId = useCurrentUserId();
 
   const domainSuffix =
     kind === "customer" ? customerCompany.emailDomainSuffix : supplierCompany.emailDomainSuffix;
@@ -1868,6 +1873,19 @@ function PartyWorkspacePanel({
     setEmployees(record.employees);
     setEditingId(record.id);
     setActiveSubTab(tab);
+  }
+
+  const canEditSupplier = (record: SupplierRecord): boolean =>
+    isAdmin || record.userId === currentUserId || !record.userId;
+
+  async function toggleSupplierShared(record: SupplierRecord, shared: boolean) {
+    try {
+      await setSupplierShared.mutateAsync({ id: record.id, shared });
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to update supplier visibility.",
+      );
+    }
   }
 
   async function deleteSupplierRecords(ids: string[]) {
@@ -2018,12 +2036,13 @@ function PartyWorkspacePanel({
     kind === "customer"
       ? customerCompanySchema.safeParse(customerCompany).success
       : supplierCompanySchema.safeParse(supplierCompany).success;
-  const selectedFilteredSupplierIds = filteredSupplierRecords
+  const editableSupplierRecords = filteredSupplierRecords.filter(canEditSupplier);
+  const selectedFilteredSupplierIds = editableSupplierRecords
     .map((record) => record.id)
     .filter((id) => selectedSupplierIds.includes(id));
   const allFilteredSuppliersSelected =
-    filteredSupplierRecords.length > 0 &&
-    selectedFilteredSupplierIds.length === filteredSupplierRecords.length;
+    editableSupplierRecords.length > 0 &&
+    selectedFilteredSupplierIds.length === editableSupplierRecords.length;
   const selectedSupplierDeleteDescription =
     selectedSupplierIds.length === 1
       ? "Delete this supplier record? Products from this supplier will become unlinked."
@@ -2095,7 +2114,7 @@ function PartyWorkspacePanel({
                           aria-label="Select all visible suppliers"
                           checked={allFilteredSuppliersSelected}
                           onChange={(event) => {
-                            const visibleIds = filteredSupplierRecords.map((record) => record.id);
+                            const visibleIds = editableSupplierRecords.map((record) => record.id);
                             setSelectedSupplierIds((current) =>
                               event.target.checked
                                 ? Array.from(new Set([...current, ...visibleIds]))
@@ -2110,6 +2129,7 @@ function PartyWorkspacePanel({
                       <th className="px-4 py-3">Product types</th>
                       <th className="px-4 py-3">Employees</th>
                       <th className="px-4 py-3">Products</th>
+                      {isAdmin ? <th className="px-4 py-3">Visible to users</th> : null}
                       {isAdmin ? <th className="px-4 py-3">Creator</th> : null}
                       <th className="px-4 py-3 text-right">Actions</th>
                     </tr>
@@ -2181,6 +2201,7 @@ function PartyWorkspacePanel({
                         />
                       </th>
                       {isAdmin ? <th className="px-4 py-2" /> : null}
+                      {isAdmin ? <th className="px-4 py-2" /> : null}
                       <th className="text-muted-foreground px-4 py-2 text-right">Actions</th>
                     </tr>
                   </thead>
@@ -2188,7 +2209,7 @@ function PartyWorkspacePanel({
                     {filteredSupplierRecords.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={isAdmin ? 8 : 7}
+                          colSpan={isAdmin ? 9 : 7}
                           className="text-muted-foreground px-4 py-10 text-center text-sm"
                         >
                           No suppliers match the active filters.
@@ -2207,6 +2228,7 @@ function PartyWorkspacePanel({
                           count + product.variants.filter((variant) => variant.image).length,
                         0,
                       );
+                      const editable = canEditSupplier(record);
 
                       return (
                         <tr key={record.id} className="hover:bg-muted/30">
@@ -2215,6 +2237,7 @@ function PartyWorkspacePanel({
                               type="checkbox"
                               aria-label={`Select ${record.company.companyName}`}
                               checked={selectedSupplierIds.includes(record.id)}
+                              disabled={!editable}
                               onChange={(event) =>
                                 setSelectedSupplierIds((current) =>
                                   event.target.checked
@@ -2225,7 +2248,14 @@ function PartyWorkspacePanel({
                               className="accent-primary size-4"
                             />
                           </td>
-                          <td className="px-4 py-3 font-medium">{record.company.companyName}</td>
+                          <td className="px-4 py-3 font-medium">
+                            <div className="flex items-center gap-2">
+                              {record.company.companyName}
+                              {record.isShared ? (
+                                <Badge variant="secondary">Shared</Badge>
+                              ) : null}
+                            </div>
+                          </td>
                           <td className="text-muted-foreground px-4 py-3">
                             @{record.company.emailDomainSuffix}
                           </td>
@@ -2240,6 +2270,17 @@ function PartyWorkspacePanel({
                           </td>
                           <td className="px-4 py-3">{record.employees.length}</td>
                           <td className="px-4 py-3">{productRecords.length}</td>
+                          {isAdmin ? (
+                            <td className="px-4 py-3">
+                              <Switch
+                                size="sm"
+                                checked={record.isShared}
+                                disabled={setSupplierShared.isPending}
+                                onCheckedChange={(next) => toggleSupplierShared(record, next)}
+                                aria-label={`Share ${record.company.companyName} with all users`}
+                              />
+                            </td>
+                          ) : null}
                           {isAdmin ? (
                             <td className="max-w-44 px-4 py-3 break-words">
                               <CreatorCell creators={creators} userId={record.userId} />
@@ -2263,32 +2304,36 @@ function PartyWorkspacePanel({
                                   View product (0)
                                 </Button>
                               )}
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => editRecord(record, "company")}
-                              >
-                                <Pencil />
-                                Edit
-                              </Button>
-                              <ConfirmDialog
-                                title="Delete supplier record?"
-                                description={`Delete ${record.company.companyName}? Products from this supplier will become unlinked.`}
-                                confirmLabel="Delete supplier"
-                                onConfirm={() => deleteSupplierRecords([record.id])}
-                                trigger={
+                              {editable ? (
+                                <>
                                   <Button
                                     type="button"
                                     variant="ghost"
                                     size="sm"
-                                    disabled={deleteSuppliers.isPending}
+                                    onClick={() => editRecord(record, "company")}
                                   >
-                                    <Trash2 />
-                                    Delete
+                                    <Pencil />
+                                    Edit
                                   </Button>
-                                }
-                              />
+                                  <ConfirmDialog
+                                    title="Delete supplier record?"
+                                    description={`Delete ${record.company.companyName}? Products from this supplier will become unlinked.`}
+                                    confirmLabel="Delete supplier"
+                                    onConfirm={() => deleteSupplierRecords([record.id])}
+                                    trigger={
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        disabled={deleteSuppliers.isPending}
+                                      >
+                                        <Trash2 />
+                                        Delete
+                                      </Button>
+                                    }
+                                  />
+                                </>
+                              ) : null}
                             </div>
                           </td>
                         </tr>

@@ -49,6 +49,7 @@ const supplierRowSchema = z.object({
   company_name: z.string(),
   email_domain_suffix: z.string(),
   product_types: z.array(z.string()),
+  is_shared: z.boolean().nullable().optional(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -208,6 +209,7 @@ function mapSupplier(rowValue: unknown, employeeRows: unknown): SupplierRecord {
       productTypes: normalizeSupplierProductTypes(row.product_types),
     },
     employees: mapEmployees(employeeRows),
+    isShared: row.is_shared === true,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -334,7 +336,7 @@ export function createSupabaseWorkspaceRecordStore(): WorkspaceRecordStore {
       const { data, error } = await supabase
         .from("suppliers")
         .select(
-          "id, user_id, company_name, email_domain_suffix, product_types, created_at, updated_at, supplier_employees(id, user_name, email_prefix, title, tel, sort_index)",
+          "id, user_id, company_name, email_domain_suffix, product_types, is_shared, created_at, updated_at, supplier_employees(id, user_name, email_prefix, title, tel, sort_index)",
         )
         .order("updated_at", { ascending: false });
       assertNoError({ error }, "listSuppliers");
@@ -363,6 +365,14 @@ export function createSupabaseWorkspaceRecordStore(): WorkspaceRecordStore {
       if (ids.length === 0) return;
       const { error } = await supabase.from("suppliers").delete().in("id", ids);
       assertNoError({ error }, "deleteSuppliers");
+    },
+
+    async setSupplierShared(id, shared) {
+      const { error } = await supabase.rpc("set_supplier_shared", {
+        p_supplier_id: id,
+        p_shared: shared,
+      });
+      assertNoError({ error }, "setSupplierShared");
     },
 
     async listProducts() {

@@ -49,6 +49,7 @@ interface SupplierRow {
   company_name: string;
   email_domain_suffix: string;
   product_types: string[];
+  is_shared: boolean | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -147,6 +148,7 @@ function mapSupplier(row: SupplierRow, employees: EmployeeRow[]): SupplierRecord
       productTypes: normalizeSupplierProductTypes(row.product_types ?? []),
     },
     employees: mapEmployees(employees),
+    isShared: row.is_shared === true,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   };
@@ -344,7 +346,7 @@ export function createPostgresWorkspaceRecordStore(): WorkspaceRecordStore {
     async listSuppliers() {
       await ensureLocalProfile();
       const rows = await query<SupplierRow>(
-        `SELECT id, company_name, email_domain_suffix, product_types, created_at, updated_at
+        `SELECT id, company_name, email_domain_suffix, product_types, is_shared, created_at, updated_at
          FROM public.suppliers
          WHERE user_id = $1
          ORDER BY updated_at DESC`,
@@ -378,7 +380,7 @@ export function createPostgresWorkspaceRecordStore(): WorkspaceRecordStore {
              email_domain_suffix = EXCLUDED.email_domain_suffix,
              product_types = EXCLUDED.product_types,
              updated_at = now()
-           RETURNING id, company_name, email_domain_suffix, product_types, created_at, updated_at`,
+           RETURNING id, company_name, email_domain_suffix, product_types, is_shared, created_at, updated_at`,
           [
             supplierId,
             localUserId,
@@ -431,6 +433,11 @@ export function createPostgresWorkspaceRecordStore(): WorkspaceRecordStore {
         localUserId,
         ids,
       ]);
+    },
+
+    async setSupplierShared(id, shared) {
+      await ensureLocalProfile();
+      await query(`UPDATE public.suppliers SET is_shared = $2 WHERE id = $1`, [id, shared]);
     },
 
     async listProducts() {

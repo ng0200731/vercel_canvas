@@ -244,6 +244,7 @@ CREATE TABLE IF NOT EXISTS public.suppliers (
   company_name        text NOT NULL,
   email_domain_suffix text NOT NULL,
   product_types       text[] NOT NULL DEFAULT '{}',
+  is_shared           boolean NOT NULL DEFAULT false,
   created_at          timestamptz NOT NULL DEFAULT now(),
   updated_at          timestamptz NOT NULL DEFAULT now()
 );

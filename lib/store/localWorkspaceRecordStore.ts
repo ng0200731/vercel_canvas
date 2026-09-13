@@ -246,6 +246,7 @@ async function saveLocalProducts(records: ProductRecord[]): Promise<void> {
 function normalizeSupplierRecord(record: SupplierRecord): SupplierRecord {
   return {
     ...record,
+    isShared: record.isShared === true,
     company: {
       ...record.company,
       productTypes: normalizeSupplierProductTypes(record.company.productTypes),
@@ -301,11 +302,24 @@ export const localWorkspaceRecordStore: WorkspaceRecordStore = {
       id: existing?.id ?? id ?? uid(),
       company: parsed.company,
       employees: parsed.employees,
+      isShared: existing?.isShared ?? false,
       createdAt: existing?.createdAt ?? timestamp,
       updatedAt: timestamp,
     }));
     write(KEYS.suppliers, records);
     return record;
+  },
+
+  async setSupplierShared(id, shared) {
+    const records = read<SupplierRecord[]>(KEYS.suppliers, []);
+    const record = records.find((supplier) => supplier.id === id);
+    if (!record) return;
+    write(
+      KEYS.suppliers,
+      records.map((supplier) =>
+        supplier.id === id ? { ...supplier, isShared: shared, updatedAt: nowISO() } : supplier,
+      ),
+    );
   },
 
   async deleteSuppliers(ids) {

@@ -299,6 +299,8 @@ export interface SupplierRecord {
   userId?: string | null;
   company: SupplierCompanyInput;
   employees: EmployeeRecord[];
+  /** Admin-only flag: when true, all regular users can view this supplier (read-only). */
+  isShared: boolean;
   createdAt: string;
   updatedAt: string;
 }

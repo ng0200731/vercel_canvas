@@ -101,6 +101,15 @@ export function useDeleteSuppliers() {
   });
 }
 
+export function useSetSupplierShared() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, shared }: { id: string; shared: boolean }) =>
+      getWorkspaceRecordStore().setSupplierShared(id, shared),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: SUPPLIERS_KEY }),
+  });
+}
+
 export function useProducts() {
   return useQuery({
     queryKey: PRODUCTS_KEY,
