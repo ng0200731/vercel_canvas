@@ -36,6 +36,13 @@ vi.mock("@/lib/supplier-image-vector-match", async (original) => {
 const vAxis = Array.from({ length: 768 }, (_, i) => (i < 384 ? 1 / Math.sqrt(384) : 0));
 const vOther = Array.from({ length: 768 }, (_, i) => (i >= 384 ? 1 / Math.sqrt(384) : 0));
 
+interface GenerateRequest {
+  contents: { parts: { inline_data: { data: string } }[] }[];
+  safetySettings: { category: string; threshold: string }[];
+  generationConfig: { responseModalities: string[] };
+}
+const seenGenerateRequests: GenerateRequest[] = [];
+
 interface EmbedRequest {
   content: { parts: { text: string }[] };
   taskType: string;
@@ -46,17 +53,35 @@ function fakeFetcher(): typeof fetch {
   return (async (url: RequestInfo | URL, init?: RequestInit) => {
     const u = new URL(typeof url === "string" ? url : url.toString());
     if (u.pathname.endsWith(":generateContent")) {
-      const body = JSON.parse(String(init?.body ?? "{}")) as {
-        contents: { parts: { inline_data: { data: string } }[] }[];
-      };
+      const body = JSON.parse(String(init?.body ?? "{}")) as GenerateRequest;
+      seenGenerateRequests.push(body);
       const marker = Buffer.from(
         body.contents[0]!.parts[0]!.inline_data.data,
         "base64",
       ).toString("utf8");
       const caption = marker === "b" ? "other caption" : "match caption";
+      // Mimic a real Gemini generateContent payload, which carries extra fields
+      // (thoughtSignature on each part, top-level usageMetadata/modelVersion)
+      // that a strict parser would reject. The permissive schema must still
+      // extract the caption text.
       return new Response(
         JSON.stringify({
-          candidates: [{ content: { parts: [{ text: caption }] } }],
+          candidates: [
+            {
+              content: {
+                parts: [{ text: caption, thoughtSignature: "EsADCr0D..." }],
+              },
+              finishReason: "STOP",
+            },
+          ],
+          promptFeedback: { blockReason: "NONE" },
+          usageMetadata: {
+            promptTokenCount: 100,
+            candidatesTokenCount: 20,
+            totalTokenCount: 120,
+            thoughtsTokenCount: 0,
+          },
+          modelVersion: "gemini-3.6-flash",
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
@@ -76,7 +101,7 @@ function fakeFetcher(): typeof fetch {
 
 const baseConfig: SupplierImageGeminiCaptionConfig = {
   apiKey: "k",
-  visionModel: "gemini-2.5-flash",
+  visionModel: "gemini-3.6-flash",
   embeddingModel: "gemini-embedding-001",
   dimensionality: 768,
   baseUrl: "https://generativelanguage.googleapis.com",
@@ -140,6 +165,31 @@ describe("createSupplierImageGeminiCaptionMatcher", () => {
     // Catalog embeds use RETRIEVAL_DOCUMENT.
     expect(seenEmbedRequests.slice(1).every((r) => r.taskType === "RETRIEVAL_DOCUMENT")).toBe(true);
     expect(reference).toBeDefined();
+  });
+
+  it("sends BLOCK_NONE safety settings and TEXT modality on the caption call", async () => {
+    seenGenerateRequests.length = 0;
+    const matcher = createSupplierImageGeminiCaptionMatcher({
+      fetcher: fakeFetcher(),
+      config: { ...baseConfig, minCosine: 0 },
+    });
+    await matcher(request, undefined);
+
+    expect(seenGenerateRequests.length).toBe(3); // ref + 2 catalog images
+    const reference = seenGenerateRequests.find((r) =>
+      r.contents[0]!.parts[0]!.inline_data.data.includes("cmV") /* base64 "re..." for "ref" */,
+    );
+    expect(reference).toBeDefined();
+    for (const req of seenGenerateRequests) {
+      expect(req.generationConfig.responseModalities).toEqual(["TEXT"]);
+      // Safety filter must be loose so a normal product photo isn't silently blocked.
+      expect(req.safetySettings).toEqual([
+        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+      ]);
+    }
   });
 
   it("overrides config.minCosine with the DB value", async () => {

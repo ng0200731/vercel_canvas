@@ -140,7 +140,11 @@ const envSchema = z
     // Vision model used by the "Gemini caption" supplier search engine to turn
     // each image into a text caption before embedding it. Distinct from the
     // direct multimodal `gemini` engine (GEMINI_EMBEDDING_MODEL).
-    GEMINI_CAPTION_VISION_MODEL: optionalString.default("gemini-2.5-flash"),
+    GEMINI_CAPTION_VISION_MODEL: optionalString.default("gemini-3.6-flash"),
+    // Text-embedding model used to embed the caption for the "Gemini caption"
+    // engine (taskType RETRIEVAL_QUERY/DOCUMENT), per the caption→embed→cosine
+    // pipeline. The doc's reference pipeline uses gemini-embedding-001.
+    GEMINI_CAPTION_EMBEDDING_MODEL: optionalString.default("gemini-embedding-001"),
 
     // SMTP (optional, server-only). An optional local catcher overrides 163.com, then Gmail.
     SMTP_LOCAL_HOST: optionalString,
@@ -222,6 +226,7 @@ function loadEnv(): Env {
     GEMINI_MATCH_MIN_COSINE: process.env.GEMINI_MATCH_MIN_COSINE,
     GEMINI_MATCH_FALLBACK_TO_LOCAL: process.env.GEMINI_MATCH_FALLBACK_TO_LOCAL,
     GEMINI_CAPTION_VISION_MODEL: process.env.GEMINI_CAPTION_VISION_MODEL,
+    GEMINI_CAPTION_EMBEDDING_MODEL: process.env.GEMINI_CAPTION_EMBEDDING_MODEL,
     SMTP_163_USERNAME: process.env.SMTP_163_USERNAME,
     SMTP_163_PASSWORD: process.env.SMTP_163_PASSWORD,
     SMTP_LOCAL_HOST: process.env.SMTP_LOCAL_HOST,

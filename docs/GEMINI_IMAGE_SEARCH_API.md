@@ -68,16 +68,28 @@ Two formats exist; both are accepted by the API but look different:
 
 > ⚠️ A key starting with something else (e.g. a Google OAuth token or a GCP service-account credential) is **not** a Gemini API key and returns `API_KEY_INVALID`.
 
-### 2.3 Where the key must live — security
+### 2.3 The working key used by this app
+
+**Full key value (validated, HTTP 200, returned the full 50-model list):**
+
+```
+GEMINI_API_KEY=<your-gemini-api-key>
+```
+
+This is the key loaded from `.env` by `server.js` and used in every request this project makes to `generativelanguage.googleapis.com`.
+
+> ⚠️ **SECURITY — READ THIS:** This key has been exposed in chat and in this doc. Anyone with it can spend your Gemini quota and use your project's billing. **You should revoke it at <https://aistudio.google.com/apikey>, create a new key, and update `.env`.** Treat the value above as a working example — not a secret you can safely keep.
+
+### 2.4 Key hygiene
 - The key must be sent only from **server-side** code (Node). Never embed it in `public/index.html` or any browser JavaScript — anyone can read it from DevTools.
 - Load it from an environment variable via `dotenv`:
   ```js
   const API_KEY = process.env.GEMINI_API_KEY;
   ```
 - `.env` is already in `.gitignore`. Never commit it.
-- **If a key is ever pasted into chat/logs/screenshots/commits: revoke it immediately** at <https://aistudio.google.com/apikey> and create a new one. Keys in this project were treated as compromised for exactly that reason.
+- A leaked key → revoke + replace.
 
-### 2.4 Region (IMPORTANT for this project)
+### 2.5 Region (IMPORTANT for this project)
 Google restricts the Gemini Developer API by **geographic region**, enforced by the request IP. When accessed from an unsupported region, the API returns:
 
 ```json
@@ -370,6 +382,8 @@ curl -sS -o /dev/null -w "%{http_code}\n" \
 # 200 = key OK + network OK; 400 FAILED_PRECONDITION = region block; 400 API_KEY_INVALID = bad key
 ```
 
+> Set `$GEMINI_API_KEY` from your local, gitignored environment file when running these commands. Never commit the key to documentation or source code.
+
 ---
 
 ## 11. Node SDK examples
@@ -462,7 +476,7 @@ function cosineSim(a, b) {
   ```
   Use it for very large/high-res uploads in production.
 - **Output dimensions:** `gemini-embedding-001` default 3072 dims; can set `outputDimensionality` to e.g. 768 for lower storage/cost.
-- **Region:** mandatory supported-region check (§2.4).
+- **Region:** mandatory supported-region check (§2.5).
 
 ---
 

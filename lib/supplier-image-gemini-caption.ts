@@ -26,6 +26,17 @@ const EMBED_CONCURRENCY = 3;
 /** Cap the caption we embed so a verbose model response can't balloon the
  *  request body or the stored embedding source. */
 const MAX_CAPTION_CHARS = 2_000;
+/** Captioning a product photo for similarity search is a benign task, but
+ *  Gemini's default safety filters can reject a normal image (e.g. skin tone
+ *  in a fashion photo tripping a threshold), which surfaces as an empty
+ *  caption. Loosen all four filters for this description-only call so the model
+ *  actually returns a caption instead of a silent block. */
+const CAPTION_SAFETY_SETTINGS: ReadonlyArray<{ category: string; threshold: string }> = [
+  { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+  { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+  { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+  { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+];
 
 export interface SupplierImageGeminiCaptionConfig {
   apiKey: string;
@@ -57,25 +68,33 @@ const geminiGenerateResponseSchema = z
   .object({
     candidates: z
       .array(
-        z.object({
-          content: z.object({
-            parts: z.array(
-              z.object({ text: z.string().optional() }).strict(),
-            ),
-          }),
-        }),
+        z
+          .object({
+            content: z.object({
+              parts: z.array(z.object({ text: z.string().optional() })),
+            }),
+            finishReason: z.string().optional(),
+          })
+          .passthrough(),
       )
       .min(0)
       .optional(),
+    promptFeedback: z
+      .object({
+        blockReason: z.string().optional(),
+        blockReasonMessage: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
   })
-  .strict();
+  .passthrough();
 
 const geminiEmbedResponseSchema = z
   .object({
-    embedding: z.object({ values: z.array(z.number().finite()) }).strict(),
+    embedding: z.object({ values: z.array(z.number().finite()) }).passthrough(),
     usageMetadata: z.record(z.string(), z.unknown()).optional(),
   })
-  .strict();
+  .passthrough();
 
 const geminiErrorSchema = z
   .object({
@@ -100,7 +119,7 @@ export function buildSupplierImageGeminiCaptionConfig(
     Env,
     | "GEMINI_API_KEY"
     | "GEMINI_CAPTION_VISION_MODEL"
-    | "GEMINI_EMBEDDING_MODEL"
+    | "GEMINI_CAPTION_EMBEDDING_MODEL"
     | "GEMINI_EMBEDDING_DIM"
     | "GEMINI_EMBEDDING_TIMEOUT_MS"
     | "GEMINI_MATCH_TOP_K"
@@ -113,7 +132,7 @@ export function buildSupplierImageGeminiCaptionConfig(
   return {
     apiKey,
     visionModel: rawEnv.GEMINI_CAPTION_VISION_MODEL,
-    embeddingModel: rawEnv.GEMINI_EMBEDDING_MODEL,
+    embeddingModel: rawEnv.GEMINI_CAPTION_EMBEDDING_MODEL,
     dimensionality: rawEnv.GEMINI_EMBEDDING_DIM,
     baseUrl: "https://generativelanguage.googleapis.com",
     timeoutMs: rawEnv.GEMINI_EMBEDDING_TIMEOUT_MS,
@@ -175,6 +194,13 @@ function describeGeminiCaptionError(status: number, payload: unknown): string {
   const parsed = geminiErrorSchema.safeParse(payload);
   const apiMessage = parsed.success ? parsed.data.error?.message : undefined;
   const statusDetail = apiMessage ?? `Gemini failed with HTTP ${status}.`;
+  // Google blocks Gemini by geographic region (enforced on the request IP),
+  // *after* the key authenticates — so a valid key still 400s with this message.
+  // This is not a key or model problem; the fix is to reach the API from a
+  // supported region (VPN / hosting), per docs/GEMINI_IMAGE_SEARCH_API.md §2.5.
+  if (/user location is not supported/i.test(statusDetail)) {
+    return "Google blocked this request because of your network location — the Gemini API is region-restricted (this is not a key or model problem). Connect from a supported region (e.g. VPN or a supported-region host) and retry. See docs/GEMINI_IMAGE_SEARCH_API.md §2.5.";
+  }
   if (status === 400) {
     return `Gemini rejected the request (400): ${statusDetail}`;
   }
@@ -228,6 +254,7 @@ async function captionImageBuffer(
       },
     ],
     generationConfig: { responseModalities: ["TEXT"] },
+    safetySettings: CAPTION_SAFETY_SETTINGS,
   };
 
   let response: Response;
@@ -272,7 +299,20 @@ async function captionImageBuffer(
     .map((text) => text.trim())
     .filter((text) => text.length > 0)
     .join("\n");
-  if (!caption) throw new Error(`Gemini wrote no caption for ${label}.`);
+  if (!caption) {
+    // A 200 with no text is almost always a safety block or a non-STOP finish
+    // reason (not an auth/model failure). Surface the exact reason so the
+    // dialog can tell the user why instead of a vague "wrote no caption".
+    const blockReason = parsed.success
+      ? (parsed.data.promptFeedback?.blockReason ?? "NONE")
+      : "UNPARSEABLE";
+    const blockMessage = parsed.success ? parsed.data.promptFeedback?.blockReasonMessage : undefined;
+    const finishReason = parsed.success ? parsed.data.candidates?.[0]?.finishReason : undefined;
+    const detail = blockMessage?.trim() || blockReason;
+    throw new Error(
+      `Gemini wrote no caption for ${label}.${finishReason ? ` finishReason=${finishReason}` : ""}${blockReason !== "NONE" ? ` blocked=${blockReason}: ${detail}` : " Response had no text content."}`,
+    );
+  }
   return caption.slice(0, MAX_CAPTION_CHARS);
 }
 
