@@ -137,6 +137,10 @@ const envSchema = z
       z.number().min(-1).max(1),
     ),
     GEMINI_MATCH_FALLBACK_TO_LOCAL: optionalBoolean.default(false),
+    // Vision model used by the "Gemini caption" supplier search engine to turn
+    // each image into a text caption before embedding it. Distinct from the
+    // direct multimodal `gemini` engine (GEMINI_EMBEDDING_MODEL).
+    GEMINI_CAPTION_VISION_MODEL: optionalString.default("gemini-2.5-flash"),
 
     // SMTP (optional, server-only). An optional local catcher overrides 163.com, then Gmail.
     SMTP_LOCAL_HOST: optionalString,
@@ -217,6 +221,7 @@ function loadEnv(): Env {
     GEMINI_MATCH_TOP_K: process.env.GEMINI_MATCH_TOP_K,
     GEMINI_MATCH_MIN_COSINE: process.env.GEMINI_MATCH_MIN_COSINE,
     GEMINI_MATCH_FALLBACK_TO_LOCAL: process.env.GEMINI_MATCH_FALLBACK_TO_LOCAL,
+    GEMINI_CAPTION_VISION_MODEL: process.env.GEMINI_CAPTION_VISION_MODEL,
     SMTP_163_USERNAME: process.env.SMTP_163_USERNAME,
     SMTP_163_PASSWORD: process.env.SMTP_163_PASSWORD,
     SMTP_LOCAL_HOST: process.env.SMTP_LOCAL_HOST,

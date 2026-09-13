@@ -56,6 +56,7 @@ import {
   MAX_SUPPLIER_MATCH_CATALOG_IMAGES,
   SUPPLIER_MATCH_ELAND_MODEL,
   SUPPLIER_MATCH_ENGINES,
+  SUPPLIER_MATCH_GEMINI_CAPTION_MODEL,
   SUPPLIER_MATCH_GEMINI_MODEL,
   SUPPLIER_MATCH_LOCAL_MODEL,
   SUPPLIER_MATCH_LABELSTASH_MODEL,
@@ -204,6 +205,9 @@ function matchEngineLabel(model: string): string {
   if (model === SUPPLIER_MATCH_GEMINI_MODEL) {
     return "Gemini embedding-2 (cosine)";
   }
+  if (model === SUPPLIER_MATCH_GEMINI_CAPTION_MODEL) {
+    return "Gemini caption → text embedding (cosine)";
+  }
   return model;
 }
 
@@ -221,6 +225,8 @@ function engineMenuLabel(engine: SupplierMatchEngine): string {
       return "the-eland.co";
     case "gemini":
       return "Gemini";
+    case "gemini-caption":
+      return "Gemini Caption";
   }
 }
 
@@ -240,6 +246,12 @@ function engineMenuIcon(engine: SupplierMatchEngine) {
       return (
         <span aria-hidden className="grid size-4 place-items-center text-center text-[0.7rem] font-bold leading-none">
           G
+        </span>
+      );
+    case "gemini-caption":
+      return (
+        <span aria-hidden className="grid size-4 place-items-center text-center text-[0.7rem] font-bold leading-none">
+          C
         </span>
       );
   }
@@ -544,7 +556,12 @@ export function SupplierImageManagementDialog({
     setUploadError(null);
     setApplyError(null);
     if (queryImage) {
-      void runMatch(queryImage, nextEngine);
+      // Re-search the kept target with the new engine. Surface any engine
+      // failure (e.g. the-eland.co not configured) inline instead of letting
+      // the rejected promise bubble into the error overlay.
+      runMatch(queryImage, nextEngine).catch((error: unknown) => {
+        setUploadError(error instanceof Error ? error.message : "Image search failed.");
+      });
     }
   }
 
@@ -877,7 +894,9 @@ export function SupplierImageManagementDialog({
                         ? "border-violet-500/30 bg-violet-500/10 text-violet-800 dark:text-violet-200"
                         : engine === "gemini"
                           ? "border-rose-500/30 bg-rose-500/10 text-rose-800 dark:text-rose-200"
-                          : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200"
+                          : engine === "gemini-caption"
+                            ? "border-rose-500/30 bg-rose-500/10 text-rose-800 dark:text-rose-200"
+                            : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200"
               }
               variant="outline"
             >
@@ -892,7 +911,9 @@ export function SupplierImageManagementDialog({
                       ? "the-eland.co portal search"
                       : engine === "gemini"
                         ? "Gemini image search"
-                        : "Image search"}
+                        : engine === "gemini-caption"
+                          ? "Gemini image captioning search"
+                          : "Image search"}
             </Badge>
             {catalog.length ? (
               <span className="text-muted-foreground text-xs">
@@ -912,7 +933,9 @@ export function SupplierImageManagementDialog({
                     ? "Search the-eland.co by reference image"
                     : engine === "gemini"
                       ? "Search similar supplier images with Gemini"
-                      : "Search similar supplier images"}
+                      : engine === "gemini-caption"
+                        ? "Search similar supplier images with Gemini captioning"
+                        : "Search similar supplier images"}
           </DialogTitle>
           <DialogDescription>
             {engine === "milvus"
@@ -925,7 +948,9 @@ export function SupplierImageManagementDialog({
                     ? "Upload a reference image. It is sent to the-eland.co with your portal API key and matched against images your organization previously uploaded at /portal/upload (then indexed). Add a text query to narrow by name, description or tags. Empty results mean nothing is indexed yet — that is normal after a fresh upload."
                     : engine === "gemini"
                       ? "Upload a reference image. Google Gemini's multi-modal embedding model (gemini-embedding-2, 768-dim) embeds your reference and this supplier's catalog images server-side, then ranks by cosine similarity. Your reference image is sent to Google's API with your GEMINI_API_KEY; catalog images stay scoped to the selected supplier."
-                      : "Upload a reference image. Search only the selected supplier's product images and rank matches from highest to lowest similarity."}
+                      : engine === "gemini-caption"
+                        ? "Upload a reference image. Google Gemini's vision model writes a text caption for your reference and each of this supplier's catalog images, then a text-embedding model embeds the captions and ranks them by cosine similarity. Your reference image and this supplier's catalog images are sent to Google's API with your GEMINI_API_KEY."
+                        : "Upload a reference image. Search only the selected supplier's product images and rank matches from highest to lowest similarity."}
           </DialogDescription>
         </DialogHeader>
 
@@ -1114,7 +1139,9 @@ export function SupplierImageManagementDialog({
                         ? "Your reference image and optional query are sent to the-eland.co with your portal API key. Results come from images your organization previously uploaded at /portal/upload (and indexed) — the API has no per-supplier filter, so narrow with the query box (matches name/description/tags). Scores are a relative ranking signal, not a percentage."
                         : engine === "gemini"
                           ? "Your reference image and this supplier's catalog images are sent to Google's Gemini embedding API (gemini-embedding-2) with your server-side GEMINI_API_KEY, embedded to 768-dim vectors, and cosine-ranked in process. No external catalog — only the selected supplier's images leave your server."
-                          : "Search is limited to the selected supplier's images. When the CLIP sidecar is running, matches use multi-view visual embeddings plus local feature matching for crop-from-product cases; otherwise the local histogram fallback is used. No external LLM analysis."}
+                          : engine === "gemini-caption"
+                            ? "Your reference image and this supplier's catalog images are sent to Google's Gemini API with your server-side GEMINI_API_KEY: the vision model (GEMINI_CAPTION_VISION_MODEL) captions each, then the text-embedding model embeds the captions, cosine-ranked in process. No external catalog — only the selected supplier's images leave your server."
+                            : "Search is limited to the selected supplier's images. When the CLIP sidecar is running, matches use multi-view visual embeddings plus local feature matching for crop-from-product cases; otherwise the local histogram fallback is used. No external LLM analysis."}
               </p>
             </div>
           </aside>

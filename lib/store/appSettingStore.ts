@@ -7,6 +7,7 @@ import {
   preferredSmtpProviderSchema,
 } from "@/lib/email/schemas";
 import { getSupabaseServiceClient } from "@/lib/supabase/service";
+import { getSupabaseServerClient } from "@/lib/supabase/server";
 
 import { createPostgresWorkspaceRecordStore } from "./postgresWorkspaceRecordStore";
 
@@ -31,12 +32,34 @@ function databaseConfigured(): boolean {
   return isSupabaseConfigured || isLocalPostgresConfigured;
 }
 
+/**
+ * Owner id for an app_settings row. Under Supabase the row must belong to the
+ * logged-in user (the table FK points at auth.users), so we resolve the real
+ * session user — the placeholder `localUserId` only exists in local Postgres
+ * single-user mode and would violate app_settings_user_id_fkey under Supabase.
+ */
+async function resolveOwnerUserId(): Promise<string> {
+  if (isSupabaseConfigured) {
+    const supabase = await getSupabaseServerClient();
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser();
+    if (error || !user) {
+      throw new Error("Authentication is required to access application settings.");
+    }
+    return user.id;
+  }
+  return localUserId;
+}
+
 async function getAppSettingFromDb(key: string): Promise<unknown | null> {
   if (isSupabaseConfigured) {
+    const userId = await resolveOwnerUserId();
     const { data, error } = await getSupabaseServiceClient()
       .from("app_settings")
       .select("value")
-      .eq("user_id", localUserId)
+      .eq("user_id", userId)
       .eq("key", key)
       .maybeSingle();
     if (error) throw new Error(`Failed to read application setting: ${error.message}`);
@@ -47,6 +70,7 @@ async function getAppSettingFromDb(key: string): Promise<unknown | null> {
 
 async function setAppSettingToDb(key: string, value: unknown): Promise<void> {
   if (isSupabaseConfigured) {
+    const userId = await resolveOwnerUserId();
     const client = getSupabaseServiceClient();
     // "Auto" means unset: delete the row rather than writing SQL NULL, which
     // violates app_settings.value NOT NULL and would silently keep a stale
@@ -55,14 +79,14 @@ async function setAppSettingToDb(key: string, value: unknown): Promise<void> {
       const { error } = await client
         .from("app_settings")
         .delete()
-        .eq("user_id", localUserId)
+        .eq("user_id", userId)
         .eq("key", key);
       if (error) throw new Error(`Failed to clear application setting: ${error.message}`);
       return;
     }
     const { error } = await client.from("app_settings").upsert(
       {
-        user_id: localUserId,
+        user_id: userId,
         key,
         value,
         updated_at: new Date().toISOString(),

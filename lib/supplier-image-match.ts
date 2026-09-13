@@ -23,6 +23,12 @@ export const SUPPLIER_MATCH_ELAND_MODEL = "eland-portal-v1" as const;
  *  Embeds the reference + each selected-supplier catalog image server-side and
  *  cosine-ranks them in process — no Python sidecar, no external catalog. */
 export const SUPPLIER_MATCH_GEMINI_MODEL = "gemini-embedding-2" as const;
+/** Gemini image-captioning search: each image is first turned into a text
+ *  caption by a Gemini vision model, then the caption is embedded with a
+ *  Gemini text-embedding model (taskType RETRIEVAL_DOCUMENT/QUERY) and
+ *  cosine-ranked in-process. Distinct from the multimodal `gemini` engine,
+ *  which embeds raw image bytes directly. */
+export const SUPPLIER_MATCH_GEMINI_CAPTION_MODEL = "gemini-caption-v1" as const;
 export const SUPPLIER_MATCH_ENGINES = [
   "picture-sherlock",
   "milvus",
@@ -30,6 +36,7 @@ export const SUPPLIER_MATCH_ENGINES = [
   "labelstash",
   "eland",
   "gemini",
+  "gemini-caption",
 ] as const;
 export type SupplierMatchEngine = (typeof SUPPLIER_MATCH_ENGINES)[number];
 export const SUPPLIER_MATCH_MODELS = [
@@ -39,6 +46,7 @@ export const SUPPLIER_MATCH_MODELS = [
   SUPPLIER_MATCH_LABELSTASH_MODEL,
   SUPPLIER_MATCH_ELAND_MODEL,
   SUPPLIER_MATCH_GEMINI_MODEL,
+  SUPPLIER_MATCH_GEMINI_CAPTION_MODEL,
 ] as const;
 /** @deprecated Prefer SUPPLIER_MATCH_LOCAL_MODEL / SUPPLIER_MATCH_MODELS. */
 export const SUPPLIER_MATCH_MODEL = SUPPLIER_MATCH_LOCAL_MODEL;

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { createSupplierImageGeminiMatcher } from "@/lib/supplier-image-gemini";
+import { createSupplierImageGeminiCaptionMatcher } from "@/lib/supplier-image-gemini-caption";
 import { isLocalPostgresConfigured, isSupabaseConfigured } from "@/lib/env";
 import { supplierImageMatchRequestSchema } from "@/lib/supplier-image-match";
 import { matchSupplierImagesWithEland } from "@/lib/supplier-image-eland";
@@ -35,6 +36,7 @@ interface SupplierImageMatchRouteDependencies {
   matchLocal: SupplierImageMatcher;
   matchEland: SupplierImageMatcher;
   matchGemini: SupplierImageMatcher;
+  matchGeminiCaption: SupplierImageMatcher;
 }
 
 export function createSupplierImageMatchPostHandler({
@@ -43,6 +45,7 @@ export function createSupplierImageMatchPostHandler({
   matchLocal,
   matchEland,
   matchGemini,
+  matchGeminiCaption,
 }: SupplierImageMatchRouteDependencies) {
   return async function POST(request: Request) {
     let payload: unknown;
@@ -68,7 +71,9 @@ export function createSupplierImageMatchPostHandler({
             ? matchEland
             : parsed.data.engine === "gemini"
               ? matchGemini
-              : matchPictureSherlock;
+              : parsed.data.engine === "gemini-caption"
+                ? matchGeminiCaption
+                : matchPictureSherlock;
 
     try {
       return NextResponse.json(await match(parsed.data, request.signal));
@@ -86,4 +91,7 @@ export const POST = createSupplierImageMatchPostHandler({
   matchLocal: matchSupplierImages,
   matchEland: matchSupplierImagesWithEland,
   matchGemini: createSupplierImageGeminiMatcher({ resolveMinCosine: resolveGeminiMinCosine }),
+  matchGeminiCaption: createSupplierImageGeminiCaptionMatcher({
+    resolveMinCosine: resolveGeminiMinCosine,
+  }),
 });

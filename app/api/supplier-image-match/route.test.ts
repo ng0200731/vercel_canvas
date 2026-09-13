@@ -46,6 +46,7 @@ describe("POST /api/supplier-image-match", () => {
       matchLocal,
       matchEland,
       matchGemini: vi.fn<SupplierImageMatcher>(),
+      matchGeminiCaption: vi.fn<SupplierImageMatcher>(),
     });
     const response = await handler(
       post({
@@ -81,6 +82,7 @@ describe("POST /api/supplier-image-match", () => {
       matchLocal,
       matchEland,
       matchGemini: vi.fn<SupplierImageMatcher>(),
+      matchGeminiCaption: vi.fn<SupplierImageMatcher>(),
     });
     const response = await handler(post(validBody));
 
@@ -121,6 +123,7 @@ describe("POST /api/supplier-image-match", () => {
       matchLocal,
       matchEland,
       matchGemini: vi.fn<SupplierImageMatcher>(),
+      matchGeminiCaption: vi.fn<SupplierImageMatcher>(),
     });
     const response = await handler(post({ ...validBody, engine: "milvus" }));
 
@@ -158,6 +161,7 @@ describe("POST /api/supplier-image-match", () => {
       matchLocal,
       matchEland,
       matchGemini,
+      matchGeminiCaption: vi.fn<SupplierImageMatcher>(),
     });
     const response = await handler(post({ ...validBody, engine: "gemini" }));
 
@@ -172,6 +176,46 @@ describe("POST /api/supplier-image-match", () => {
     expect(matchEland).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       model: "gemini-embedding-2",
+    });
+  });
+
+  it("dispatches gemini-caption engine to the caption matcher", async () => {
+    const matchPictureSherlock = vi.fn<SupplierImageMatcher>();
+    const matchMilvus = vi.fn<SupplierImageMatcher>();
+    const matchLocal = vi.fn<SupplierImageMatcher>();
+    const matchEland = vi.fn<SupplierImageMatcher>();
+    const matchGeminiCaption = vi.fn<SupplierImageMatcher>().mockResolvedValue({
+      matches: [
+        {
+          catalogItemId: "product-1:variant-1",
+          similarity: 86,
+          cosine: 0.71,
+        },
+      ],
+      searchedCount: 1,
+      model: "gemini-caption-v1",
+    });
+    const handler = createSupplierImageMatchPostHandler({
+      matchPictureSherlock,
+      matchMilvus,
+      matchLocal,
+      matchEland,
+      matchGemini: vi.fn<SupplierImageMatcher>(),
+      matchGeminiCaption,
+    });
+    const response = await handler(post({ ...validBody, engine: "gemini-caption" }));
+
+    expect(response.status).toBe(200);
+    expect(matchGeminiCaption).toHaveBeenCalledWith(
+      expect.objectContaining({ engine: "gemini-caption" }),
+      expect.any(AbortSignal),
+    );
+    expect(matchPictureSherlock).not.toHaveBeenCalled();
+    expect(matchMilvus).not.toHaveBeenCalled();
+    expect(matchLocal).not.toHaveBeenCalled();
+    expect(matchEland).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      model: "gemini-caption-v1",
     });
   });
 
@@ -195,6 +239,7 @@ describe("POST /api/supplier-image-match", () => {
       matchLocal,
       matchEland: vi.fn<SupplierImageMatcher>(),
       matchGemini: vi.fn<SupplierImageMatcher>(),
+      matchGeminiCaption: vi.fn<SupplierImageMatcher>(),
     });
     const response = await handler(post({ ...validBody, engine: "local" }));
 
@@ -220,6 +265,7 @@ describe("POST /api/supplier-image-match", () => {
       matchLocal: vi.fn<SupplierImageMatcher>(),
       matchEland: vi.fn<SupplierImageMatcher>(),
       matchGemini: vi.fn<SupplierImageMatcher>(),
+      matchGeminiCaption: vi.fn<SupplierImageMatcher>(),
     });
     const response = await handler(post(validBody));
 
@@ -244,6 +290,7 @@ describe("POST /api/supplier-image-match", () => {
       matchLocal: vi.fn<SupplierImageMatcher>(),
       matchEland: vi.fn<SupplierImageMatcher>(),
       matchGemini: vi.fn<SupplierImageMatcher>(),
+      matchGeminiCaption: vi.fn<SupplierImageMatcher>(),
     });
     const response = await handler(post(validBody));
 

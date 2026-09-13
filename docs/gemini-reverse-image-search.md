@@ -47,6 +47,9 @@ GEMINI_MATCH_TOP_K=12
 GEMINI_MATCH_MIN_COSINE=0
 # On API failure, fall back to a local matcher (you must supply one).
 GEMINI_MATCH_FALLBACK_TO_LOCAL=false
+# Vision model used by the "Gemini Caption" engine (captions each image, then
+# embeds the caption text for retrieval-based search).
+GEMINI_CAPTION_VISION_MODEL=gemini-2.5-flash
 ```
 
 ---
