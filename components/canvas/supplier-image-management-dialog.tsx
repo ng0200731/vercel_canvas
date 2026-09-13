@@ -537,13 +537,15 @@ export function SupplierImageManagementDialog({
     if (nextEngine === activeEngine) return;
     setActiveEngine(nextEngine);
     onEngineChange?.(nextEngine);
-    // Results, query image, and any compare/apply state are engine-specific;
-    // clear them so the newly chosen engine starts from a clean slate.
+    // Keep the uploaded target image; only clear stale results/compare state so
+    // the target is re-searched with the newly selected engine.
     matchMutation.reset();
     setComparisonMatchId(null);
-    setQueryImage(null);
     setUploadError(null);
     setApplyError(null);
+    if (queryImage) {
+      void runMatch(queryImage, nextEngine);
+    }
   }
 
   const supplierById = useMemo(
@@ -637,9 +639,12 @@ export function SupplierImageManagementDialog({
     [comparisonMatchId, rankedMatches],
   );
 
-  async function runMatch(nextQueryImage: SupplierMatchQueryImage) {
+  async function runMatch(
+    nextQueryImage: SupplierMatchQueryImage,
+    engineForCall: SupplierMatchEngine = engine,
+  ) {
     setUploadError(null);
-    if (engine === "eland") {
+    if (engineForCall === "eland") {
       if (!currentSupplierId || isCatalogLoading || Boolean(blockingCatalogError)) {
         setUploadError(
           blockingCatalogError ??
@@ -666,8 +671,8 @@ export function SupplierImageManagementDialog({
       queryImage: nextQueryImage,
       catalog,
       currentSupplierId,
-      engine,
-      query: engine === "eland" ? elandQueryStore.current.trim() || undefined : undefined,
+      engine: engineForCall,
+      query: engineForCall === "eland" ? elandQueryStore.current.trim() || undefined : undefined,
     });
   }
 
