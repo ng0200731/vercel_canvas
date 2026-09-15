@@ -9,6 +9,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
+import { useRouter } from "next/navigation";
 import { type NodeProps } from "@xyflow/react";
 import { ChevronRight, Loader2, Plus, Sparkles, Square, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -720,6 +721,7 @@ export function GenerateNode({ id, data, parentId, selected }: NodeProps<Generat
   } = useCanvasActions();
   const highlight = useConnectionHighlight(id);
   const accent = useGroupAccent(parentId);
+  const router = useRouter();
   const { hoveredReferenceNodeId, setHoveredReferenceNodeId } = useReferenceHover();
   const [invalidPromptRows, setInvalidPromptRows] = useState<ReadonlySet<string>>(new Set());
   const [maskPreviewRowId, setMaskPreviewRowId] = useState<string | null>(null);
@@ -1162,6 +1164,9 @@ export function GenerateNode({ id, data, parentId, selected }: NodeProps<Generat
         throw new Error("Output node was disconnected before generation finished");
       }
       toast.success("Image generated and saved to Renders.");
+      // Re-render the server layout so the header's remaining-count reflects
+      // this generation (the DB is already decremented by the consume RPC).
+      router.refresh();
     } catch (err) {
       const cancelled =
         run.signal.aborted || !isGenerationRunCurrent(id, run.runId) || isAbortError(err);

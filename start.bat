@@ -94,9 +94,11 @@ if %NEED_ELEVATION% equ 1 (
     timeout /t 3 /nobreak >nul
 )
 
-REM Open the browser a few seconds after the server starts (runs in parallel).
-REM `ping` is used as the delay because it works in any console context (timeout does not).
-start "" /min cmd /c "ping -n 5 127.0.0.1 >nul & start "" http://localhost:3000/login"
+REM Open the browser only once the dev server is actually serving requests
+REM (poll until an HTTP response arrives, instead of guessing with a fixed delay).
+REM A connection error keeps polling; any HTTP response (even 4xx during the
+REM brief cold-start window) counts as "server is up".
+start "" /min powershell -NoProfile -Command "$u='http://localhost:3000/login'; for($i=0;$i -lt 90;$i++){ try{$r=[Net.HttpWebRequest]::Create($u); $r.Timeout=2000; $x=$r.GetResponse(); $x.Close(); break}catch{if($_.Exception.Response -ne $null){break}}; Start-Sleep -Milliseconds 1000 }; Start-Process $u"
 
 call pnpm dev
 
