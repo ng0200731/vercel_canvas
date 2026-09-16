@@ -2,6 +2,8 @@ import { z } from "zod";
 
 export const IMAGE_GENERATION_MODEL_IDS = [
   "gpt-image-2",
+  "gpt-image-2.5-flare",
+  "gpt-image-2.5-sunburst",
   "gpt-image-1.5",
   "gpt-image-1",
   "gpt-image-1-mini",
@@ -379,6 +381,22 @@ export const MODEL_CATALOG_GROUPS: readonly ModelCatalogGroup[] = [
         id: "gpt-image-2",
         officialName: "gpt-image-2",
         aliases: ["DALL-E 3", "GPT Image V2"],
+        family: "gpt-image",
+        capability: "image",
+        enabled: true,
+      },
+      {
+        id: "gpt-image-2.5-flare",
+        officialName: "gpt-image-2.5-flare",
+        aliases: ["GPT Image 2.5 Flare", "GPT Image V2.5"],
+        family: "gpt-image",
+        capability: "image",
+        enabled: true,
+      },
+      {
+        id: "gpt-image-2.5-sunburst",
+        officialName: "gpt-image-2.5-sunburst",
+        aliases: ["GPT Image 2.5 Sunburst"],
         family: "gpt-image",
         capability: "image",
         enabled: true,

@@ -1,3 +1,8 @@
+// @vitest-environment node
+// The generator's default fetcher is undici's, so multipart bodies are undici's
+// FormData/Blob (the same classes Node uses at runtime). jsdom can't represent
+// those (its Blob/FormData are different classes undici rejects), so these tests
+// must run in the node environment to match production.
 import { describe, expect, it, vi } from "vitest";
 
 import { createXiangsuImageGenerator } from "@/lib/xiangsu";
@@ -18,7 +23,12 @@ const input = {
 };
 
 function formDataBody(body: BodyInit | null | undefined): FormData {
-  expect(body).toBeInstanceOf(FormData);
+  // The generator's default fetcher is undici's, so the multipart body is
+  // undici's FormData class — not the global `FormData`. Duck-type instead of
+  // `instanceof` so the assertion holds regardless of the fetch implementation.
+  expect(body).toBeTruthy();
+  expect(typeof (body as FormData).get).toBe("function");
+  expect(typeof (body as FormData).append).toBe("function");
   return body as FormData;
 }
 

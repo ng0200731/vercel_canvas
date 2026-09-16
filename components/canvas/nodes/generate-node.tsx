@@ -105,6 +105,20 @@ const GPT_MODEL_OPTIONS: readonly {
   disabledReason?: string;
 }[] = [
   {
+    label: "2.5 Flare",
+    description: "GPT Image 2.5 Flare (relay's current image model)",
+    model: "gpt-image-2.5-flare",
+    status: "current",
+    enabled: true,
+  },
+  {
+    label: "2.5 Sunburst",
+    description: "GPT Image 2.5 Sunburst (relay's current image model)",
+    model: "gpt-image-2.5-sunburst",
+    status: "current",
+    enabled: true,
+  },
+  {
     label: "2",
     description: "GPT Image 2",
     model: "gpt-image-2",

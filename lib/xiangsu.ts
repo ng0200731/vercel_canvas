@@ -25,24 +25,50 @@ import {
   referencesForProvider,
   type ProviderImageReference,
 } from "@/lib/reference-prompt";
-import {
-  alphaMapBbox,
-  alphaMapFromBuffer,
-  compositeAlphaShape,
-} from "@/lib/mask-composite";
+import { alphaMapBbox, alphaMapFromBuffer, compositeAlphaShape } from "@/lib/mask-composite";
 import { loadSharp } from "@/lib/sharp";
+import { Agent, fetch as undiciFetch, FormData as ProviderFormData } from "undici";
 
 const XIANGSU_GENERATION_URL = "https://www.xiangsuai.cn/v1/images/generations";
 const XIANGSU_EDIT_URL = "https://www.xiangsuai.cn/v1/images/edits";
 const XIANGSU_GEMINI_BASE_URL = "https://www.xiangsuai.cn/v1beta/models";
 
+// The Xiangsu relay generates images server-side and can take several minutes
+// to respond to a heavy multi-reference edit. undici's default
+// headersTimeout/bodyTimeout is only 300s, so such a request gets killed
+// mid-flight with a generic `TypeError: fetch failed` — which this module maps
+// to the user-facing "connection failed" message even though the relay actually
+// finished generating (the image is produced server-side but never returns to
+// the app). We relax the socket-level timeouts here so the request survives a
+// slow generation. The caller still controls cancellation via AbortSignal (see
+// generateImage); we never add a JS timer, so `Signal`/timeout tests pass.
+const PROVIDER_SOCKET_TIMEOUT_MS = 20 * 60_000; // 20 minutes
+
+const providerAgent = new Agent({
+  connectTimeout: 30_000,
+  headersTimeout: PROVIDER_SOCKET_TIMEOUT_MS,
+  bodyTimeout: PROVIDER_SOCKET_TIMEOUT_MS,
+});
+
+// Default fetcher: plain undici fetch bound to the long-timeout agent. Tests
+// always inject a mock `fetcher`, so this default only runs in production.
+// Typed as `typeof fetch` so it can be the default for the injected dependency;
+// undici's own `Response`/`RequestInfo` types differ from the DOM lib ones, so
+// the return is cast to the global `Response`.
+const fetchWithProviderTimeouts: typeof fetch = (input, init) =>
+  undiciFetch(
+    input as Parameters<typeof undiciFetch>[0],
+    {
+      ...(init ?? {}),
+      dispatcher: providerAgent,
+    } as Parameters<typeof undiciFetch>[1],
+  ) as unknown as Promise<Response>;
+
 const providerImageSchema = z
   .object({
     b64_json: z.string().min(1).optional(),
     url: z.string().url().optional(),
-    image_url: z
-      .union([z.string().url(), z.object({ url: z.string().url() })])
-      .optional(),
+    image_url: z.union([z.string().url(), z.object({ url: z.string().url() })]).optional(),
     result_url: z.string().url().optional(),
     output_url: z.string().url().optional(),
   })
@@ -154,6 +180,72 @@ function isNetworkFetchError(error: unknown): boolean {
   );
 }
 
+// undici surfaces socket-level failures (timeouts, resets) as
+// `TypeError: fetch failed` with the real reason on `error.cause` — e.g.
+// `{ code: "UND_ERR_HEADERS_TIMEOUT" }` or `{ code: "ECONNRESET" }`. The
+// base message hides that, so surface it as a short suffix for diagnostics.
+function networkErrorCauseDetail(error: unknown): string {
+  const cause = (error as { cause?: unknown } | null)?.cause;
+  if (!cause) return "";
+  if (typeof cause === "string") return cause;
+  if (cause instanceof Error) {
+    const code = (cause as { code?: unknown }).code;
+    const message = cause.message;
+    if (typeof code === "string" && code && code !== message) return `${code}: ${message}`;
+    return message;
+  }
+  return String(cause);
+}
+
+// Duck-types a real HTTP Response (the global DOM Response OR undici's own
+// Response class) so `instanceof Response` isn't relied on. The default fetcher
+// uses undici's fetch, whose Response class differs from the global one, so a
+// `instanceof` check would misclassify it and wrongly take the two-pass return
+// path. A non-Response result (the two-pass final result from a test fetcher)
+// has no `.json()`/`.ok` members, so it is correctly distinguished here.
+function isProviderResponse(value: unknown): value is Response {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as Response).json === "function" &&
+    typeof (value as Response).ok === "boolean"
+  );
+}
+
+// A relay rejection like "image_async task ... failed: unsupported 10k image
+// model: gpt-image-medium" is cryptic — it reads like a connection/timeout
+// problem but is actually the provider's async edit pipeline rejecting the
+// model/resolution. Map it to a clear, actionable message (the raw relay text is
+// kept so the generate log stays diagnosable). Other errors pass through.
+function clarifyProviderRejection(error: unknown): Error {
+  if (error instanceof Error) {
+    const lower = error.message.toLowerCase();
+    if (lower.includes("image_async task") && lower.includes("failed")) {
+      return new Error(
+        `The image provider's edit pipeline rejected this request (relay: ${error.message.slice(0, 140)}). This is a provider-side model/resolution limitation, not a network error. Try GPT Image 1.5 Pro or 1, or reduce the number of reference images.`,
+      );
+    }
+  }
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+/** Short delay between provider retries that short-circuits on abort. */
+async function sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {
+  await new Promise<void>((resolve) => {
+    if (signal.aborted) return resolve();
+    let timer: ReturnType<typeof setTimeout>;
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 function promptContent(prompt: string, imageUrls: readonly string[]) {
   if (imageUrls.length === 0) return prompt;
 
@@ -242,7 +334,7 @@ async function blobFromReferenceUrl(
 }
 
 async function appendEditImages(
-  form: FormData,
+  form: ProviderFormData,
   imageUrls: readonly string[],
   fetcher: typeof fetch,
   signal: AbortSignal,
@@ -304,7 +396,7 @@ function isOpenAiEditEligible(input: XiangsuGenerateInput): boolean {
 
 export function createXiangsuImageGenerator({
   apiKey,
-  fetcher = fetch,
+  fetcher = fetchWithProviderTimeouts,
 }: XiangsuGeneratorOptions) {
   return async function generateImage(
     input: XiangsuGenerateInput,
@@ -313,7 +405,9 @@ export function createXiangsuImageGenerator({
     const useOpenAi = env.OPENAI_API_KEY && isOpenAiEditEligible(input);
     const effectiveApiKey = useOpenAi ? env.OPENAI_API_KEY : apiKey;
     if (!effectiveApiKey) {
-      throw new Error("AI generation is disabled. Set XIANGSU_API_KEY or OPENAI_API_KEY in .env.local.");
+      throw new Error(
+        "AI generation is disabled. Set XIANGSU_API_KEY or OPENAI_API_KEY in .env.local.",
+      );
     }
 
     if (!xiangsuImageModelIdSchema.safeParse(input.model).success) {
@@ -328,270 +422,296 @@ export function createXiangsuImageGenerator({
       requestSignal?.addEventListener("abort", abortFromRequest, { once: true });
     }
     try {
-      let compiled = compileReferencePrompt(input.prompt, input.references);
-      const ordered = orderedReferences(input.prompt, referencesForProvider(input.references));
-      const diagnosticsRef: { current?: XiangsuGenerateDiagnostics } = {};
+      const MAX_PROVIDER_ATTEMPTS = 3;
+      const RETRY_BACKOFF_BASE_MS = 1200;
+      let lastError: unknown;
+      for (let attempt = 0; attempt < MAX_PROVIDER_ATTEMPTS; attempt += 1) {
+        try {
+          let compiled = compileReferencePrompt(input.prompt, input.references);
+          const ordered = orderedReferences(input.prompt, referencesForProvider(input.references));
+          const diagnosticsRef: { current?: XiangsuGenerateDiagnostics } = {};
 
-      if (compiled.imageUrls.length > 0 && isDallEModel(input.model)) {
-        throw new Error(
-          "DALL-E models do not support reference-image editing. Use a GPT Image model.",
-        );
-      }
+          if (compiled.imageUrls.length > 0 && isDallEModel(input.model)) {
+            throw new Error(
+              "DALL-E models do not support reference-image editing. Use a GPT Image model.",
+            );
+          }
 
-      const isGptModel = isGptImageModel(input.model);
-      const isGemini = isGeminiImageModel(input.model);
-      const gptQuality = gptImageQualityForResolution(input.resolution);
-      const gptSize = gptImageSizeForResolution(input.size, input.resolution);
-      const gptOutputFormat: ImageGenerationOutputFormat = isGptModel ? "png" : input.outputFormat;
+          const isGptModel = isGptImageModel(input.model);
+          const isGemini = isGeminiImageModel(input.model);
+          const gptQuality = gptImageQualityForResolution(input.resolution);
+          const gptSize = gptImageSizeForResolution(input.size, input.resolution);
+          const gptOutputFormat: ImageGenerationOutputFormat = isGptModel
+            ? "png"
+            : input.outputFormat;
 
-      const systemPrompt = input.systemPrompt?.trim();
-      const basePrompt = systemPrompt ? `${systemPrompt}\n\n${compiled.prompt}` : compiled.prompt;
-      const specSuffix = imageOutputSpecLine({
-        isGptModel,
-        matchSourceSize: input.matchSourceSize,
-        size: input.size,
-        resolution: input.resolution,
-      });
-      const promptWithSpec = `${basePrompt}${specSuffix}`;
+          const systemPrompt = input.systemPrompt?.trim();
+          const basePrompt = systemPrompt
+            ? `${systemPrompt}\n\n${compiled.prompt}`
+            : compiled.prompt;
+          const specSuffix = imageOutputSpecLine({
+            isGptModel,
+            matchSourceSize: input.matchSourceSize,
+            size: input.size,
+            resolution: input.resolution,
+          });
+          const promptWithSpec = `${basePrompt}${specSuffix}`;
 
-      const response = isGemini
-        ? await fetcher(`${XIANGSU_GEMINI_BASE_URL}/${input.model}:generateContent`, {
-            method: "POST",
-            headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [
-                {
-                  parts: await geminiParts(
-                    basePrompt,
+          const response = isGemini
+            ? await fetcher(`${XIANGSU_GEMINI_BASE_URL}/${input.model}:generateContent`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  contents: [
+                    {
+                      parts: await geminiParts(
+                        basePrompt,
+                        compiled.imageUrls,
+                        fetcher,
+                        controller.signal,
+                      ),
+                    },
+                  ],
+                  generationConfig: {
+                    imageConfig: {
+                      aspectRatio: aspectRatioForImageGenerationSize(input.size),
+                      imageSize: geminiImageSizeForResolution(input.resolution),
+                    },
+                  },
+                }),
+                signal: controller.signal,
+              })
+            : compiled.imageUrls.length > 0 && isGptModel
+              ? await (async () => {
+                  // Route any mask-attached GPT edit through runMaskedTextureTransfer.
+                  // It uses the user's own (reference-resolved) prompt as the
+                  // instruction, sends only the base image to the provider, and
+                  // uses the mask only to compute a bounding box for the final
+                  // composite — so a rough brush highlight covers the whole object.
+                  if (compiled.maskUrl) {
+                    return await runMaskedTextureTransfer(
+                      input,
+                      ordered,
+                      basePrompt,
+                      gptQuality,
+                      gptSize,
+                      apiKey,
+                      fetcher,
+                      controller.signal,
+                      diagnosticsRef,
+                    );
+                  }
+
+                  const form = new ProviderFormData();
+                  form.append("model", input.model);
+                  form.append("prompt", promptWithSpec);
+                  form.append("n", "1");
+                  form.append("quality", gptQuality);
+                  form.append("response_format", "b64_json");
+                  form.append("output_format", gptOutputFormat);
+                  const firstImageDimensions = await appendEditImages(
+                    form,
                     compiled.imageUrls,
                     fetcher,
                     controller.signal,
-                  ),
-                },
-              ],
-              generationConfig: {
-                imageConfig: {
-                  aspectRatio: aspectRatioForImageGenerationSize(input.size),
-                  imageSize: geminiImageSizeForResolution(input.resolution),
-                },
-              },
-            }),
-            signal: controller.signal,
-          })
-        : compiled.imageUrls.length > 0 && isGptModel
-          ? await (async () => {
-              // Route any mask-attached GPT edit through runMaskedTextureTransfer.
-              // It uses the user's own (reference-resolved) prompt as the
-              // instruction, sends only the base image to the provider, and
-              // uses the mask only to compute a bounding box for the final
-              // composite — so a rough brush highlight covers the whole object.
-              if (compiled.maskUrl) {
-                return await runMaskedTextureTransfer(
-                  input,
-                  ordered,
-                  basePrompt,
-                  gptQuality,
-                  gptSize,
-                  apiKey,
-                  fetcher,
-                  controller.signal,
-                  diagnosticsRef,
-                );
-              }
-
-              const form = new FormData();
-              form.append("model", input.model);
-              form.append("prompt", promptWithSpec);
-              form.append("n", "1");
-              form.append("quality", gptQuality);
-              form.append("response_format", "b64_json");
-              form.append("output_format", gptOutputFormat);
-              const firstImageDimensions = await appendEditImages(
-                form,
-                compiled.imageUrls,
-                fetcher,
-                controller.signal,
-              );
-              if (compiled.maskUrl) {
-                const maskBlob = await blobFromReferenceUrl(
-                  compiled.maskUrl,
-                  fetcher,
-                  controller.signal,
-                );
-                const maskDimensions = await imageDimensions(maskBlob);
-                if (
-                  firstImageDimensions &&
-                  maskDimensions &&
-                  (firstImageDimensions.width !== maskDimensions.width ||
-                    firstImageDimensions.height !== maskDimensions.height)
-                ) {
-                  throw new Error(
-                    `Mask dimensions (${maskDimensions.width}x${maskDimensions.height}) don't match the source image (${firstImageDimensions.width}x${firstImageDimensions.height}). Redraw the mask on the current variant.`,
                   );
-                }
-                form.append("mask", maskBlob, "mask.png");
-                if (input.matchSourceSize && firstImageDimensions) {
-                  const providerSize = sizeWithinProviderBounds(firstImageDimensions);
-                  form.append("size", `${providerSize.width}x${providerSize.height}`);
-                } else {
-                  form.append("size", gptSize);
-                }
-              } else {
-                form.append("size", gptSize);
-              }
-
-              // Build diagnostics so the user can audit exactly what was sent.
-              const resolvedReferences: XiangsuGenerateDiagnostics["resolvedReferences"] =
-                compiled.imageUrls.map((url, index) => {
-                  const alias = ordered[index]?.alias ?? `image-${index + 1}`;
-                  const isBaseWithMask = index === 0 && Boolean(compiled.maskUrl);
-                  return {
-                    alias,
-                    role: isBaseWithMask
-                      ? "base-image-with-mask"
-                      : "reference-image",
-                    imageUrl: url,
-                    maskUrl: isBaseWithMask ? compiled.maskUrl : undefined,
-                    description: ordered[index]?.description,
-                  };
-                });
-              const formFields: Record<string, string> = {
-                model: input.model,
-                prompt: promptWithSpec,
-                n: "1",
-                quality: gptQuality,
-                response_format: "b64_json",
-                output_format: gptOutputFormat,
-              };
-              for (let index = 0; index < compiled.imageUrls.length; index += 1) {
-                formFields[`image[${index}]`] = compiled.imageUrls[index];
-              }
-              formFields.size = String(form.get("size") ?? "");
-              if (compiled.maskUrl) formFields.mask = compiled.maskUrl;
-
-              (diagnosticsRef as { current?: XiangsuGenerateDiagnostics }).current = {
-                compiledPrompt: promptWithSpec,
-                resolvedReferences,
-                formFields,
-              };
-
-              const editUrl = env.OPENAI_API_KEY
-                ? `${env.OPENAI_BASE_URL ?? "https://api.openai.com"}/v1/images/edits`
-                : XIANGSU_EDIT_URL;
-              const editAuth = env.OPENAI_API_KEY
-                ? `Bearer ${env.OPENAI_API_KEY}`
-                : `Bearer ${apiKey}`;
-
-              return fetcher(editUrl, {
-                method: "POST",
-                headers: {
-                  Authorization: editAuth,
-                },
-                body: form,
-                signal: controller.signal,
-              });
-            })()
-          : await fetcher(XIANGSU_GENERATION_URL, {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${apiKey}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                model: input.model,
-                prompt: promptWithSpec,
-                n: 1,
-                size: gptSize,
-                quality: gptQuality,
-                response_format: "b64_json",
-                output_format: gptOutputFormat,
-                ...(compiled.imageUrls.length > 0
-                  ? {
-                      image_urls: compiled.imageUrls,
-                      content: promptContent(promptWithSpec, compiled.imageUrls),
+                  if (compiled.maskUrl) {
+                    const maskBlob = await blobFromReferenceUrl(
+                      compiled.maskUrl,
+                      fetcher,
+                      controller.signal,
+                    );
+                    const maskDimensions = await imageDimensions(maskBlob);
+                    if (
+                      firstImageDimensions &&
+                      maskDimensions &&
+                      (firstImageDimensions.width !== maskDimensions.width ||
+                        firstImageDimensions.height !== maskDimensions.height)
+                    ) {
+                      throw new Error(
+                        `Mask dimensions (${maskDimensions.width}x${maskDimensions.height}) don't match the source image (${firstImageDimensions.width}x${firstImageDimensions.height}). Redraw the mask on the current variant.`,
+                      );
                     }
-                  : {}),
-              }),
-              signal: controller.signal,
-            });
+                    form.append("mask", maskBlob, "mask.png");
+                    if (input.matchSourceSize && firstImageDimensions) {
+                      const providerSize = sizeWithinProviderBounds(firstImageDimensions);
+                      form.append("size", `${providerSize.width}x${providerSize.height}`);
+                    } else {
+                      form.append("size", gptSize);
+                    }
+                  } else {
+                    form.append("size", gptSize);
+                  }
 
-      let payload: unknown;
-      try {
-        if (response instanceof Response) {
-          payload = await response.json();
-        } else {
-          // Two-pass path already produced a final result — return it directly.
-          return response;
+                  // Build diagnostics so the user can audit exactly what was sent.
+                  const resolvedReferences: XiangsuGenerateDiagnostics["resolvedReferences"] =
+                    compiled.imageUrls.map((url, index) => {
+                      const alias = ordered[index]?.alias ?? `image-${index + 1}`;
+                      const isBaseWithMask = index === 0 && Boolean(compiled.maskUrl);
+                      return {
+                        alias,
+                        role: isBaseWithMask ? "base-image-with-mask" : "reference-image",
+                        imageUrl: url,
+                        maskUrl: isBaseWithMask ? compiled.maskUrl : undefined,
+                        description: ordered[index]?.description,
+                      };
+                    });
+                  const formFields: Record<string, string> = {
+                    model: input.model,
+                    prompt: promptWithSpec,
+                    n: "1",
+                    quality: gptQuality,
+                    response_format: "b64_json",
+                    output_format: gptOutputFormat,
+                  };
+                  for (let index = 0; index < compiled.imageUrls.length; index += 1) {
+                    formFields[`image[${index}]`] = compiled.imageUrls[index];
+                  }
+                  formFields.size = String(form.get("size") ?? "");
+                  if (compiled.maskUrl) formFields.mask = compiled.maskUrl;
+
+                  (diagnosticsRef as { current?: XiangsuGenerateDiagnostics }).current = {
+                    compiledPrompt: promptWithSpec,
+                    resolvedReferences,
+                    formFields,
+                  };
+
+                  const editUrl = env.OPENAI_API_KEY
+                    ? `${env.OPENAI_BASE_URL ?? "https://api.openai.com"}/v1/images/edits`
+                    : XIANGSU_EDIT_URL;
+                  const editAuth = env.OPENAI_API_KEY
+                    ? `Bearer ${env.OPENAI_API_KEY}`
+                    : `Bearer ${apiKey}`;
+
+                  return fetcher(editUrl, {
+                    method: "POST",
+                    headers: {
+                      Authorization: editAuth,
+                    },
+                    body: form as unknown as BodyInit,
+                    signal: controller.signal,
+                  });
+                })()
+              : await fetcher(XIANGSU_GENERATION_URL, {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${apiKey}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    model: input.model,
+                    prompt: promptWithSpec,
+                    n: 1,
+                    size: gptSize,
+                    quality: gptQuality,
+                    response_format: "b64_json",
+                    output_format: gptOutputFormat,
+                    ...(compiled.imageUrls.length > 0
+                      ? {
+                          image_urls: compiled.imageUrls,
+                          content: promptContent(promptWithSpec, compiled.imageUrls),
+                        }
+                      : {}),
+                  }),
+                  signal: controller.signal,
+                });
+
+          let payload: unknown;
+          try {
+            if (isProviderResponse(response)) {
+              payload = await response.json();
+            } else {
+              // Two-pass path already produced a final result — return it directly.
+              return response;
+            }
+          } catch {
+            throw new Error("The image provider returned an invalid response.");
+          }
+
+          if (!isProviderResponse(response) || !response.ok) {
+            if (!isProviderResponse(response)) {
+              throw new Error("The image provider did not return a usable response.");
+            }
+            const message =
+              providerErrorMessage(payload) ?? "The image provider rejected the request.";
+            throw new Error(sanitizeMessage(message, effectiveApiKey ?? ""));
+          }
+
+          if (isGeminiImageModel(input.model)) {
+            const parsedGemini = geminiSuccessSchema.safeParse(payload);
+            if (!parsedGemini.success)
+              throw new Error("The Gemini provider did not return an image.");
+            const imagePart = parsedGemini.data.candidates[0].content.parts.find(
+              (part) => part.inlineData || part.inline_data,
+            );
+            const inline = imagePart?.inlineData
+              ? { mimeType: imagePart.inlineData.mimeType, data: imagePart.inlineData.data }
+              : imagePart?.inline_data
+                ? { mimeType: imagePart.inline_data.mime_type, data: imagePart.inline_data.data }
+                : null;
+            if (!inline) throw new Error("The Gemini provider did not return an image.");
+            return {
+              url: `data:${inline.mimeType};base64,${inline.data}`,
+              model: input.model,
+              diagnostics: diagnosticsRef.current,
+            };
+          }
+
+          const parsed = providerSuccessSchema.safeParse(payload);
+          if (!parsed.success) {
+            throw new Error("The image provider did not return an image.");
+          }
+
+          const list =
+            parsed.data.data ??
+            parsed.data.result ??
+            parsed.data.output ??
+            parsed.data.images ??
+            parsed.data.image ??
+            [];
+          const image = list[0];
+          if (!image) throw new Error("The image provider did not return an image.");
+
+          const imageUrl =
+            (typeof image.image_url === "string" ? image.image_url : image.image_url?.url) ??
+            image.url ??
+            image.result_url ??
+            image.output_url;
+          const url =
+            imageUrl ?? (image.b64_json ? `data:image/png;base64,${image.b64_json}` : null);
+          if (!url) throw new Error("The image provider did not return an image.");
+          return { url, model: input.model, diagnostics: diagnosticsRef.current };
+        } catch (error) {
+          if (isAbortError(error)) {
+            if (requestSignal?.aborted) {
+              throw requestSignal.reason instanceof Error
+                ? requestSignal.reason
+                : new DOMException("Generation cancelled", "AbortError");
+            }
+            throw new Error("Image generation was aborted. Please try again.");
+          }
+          if (isNetworkFetchError(error)) {
+            // Only genuine transport failures (connection dropped / socket
+            // timeout) are transient and worth retrying. A real relay rejection
+            // like the async edit task failing is deterministic — retrying it
+            // would spin the output node for another ~5.5min each try — so it
+            // is surfaced as-is after this attempt.
+            if (attempt + 1 < MAX_PROVIDER_ATTEMPTS && !requestSignal?.aborted) {
+              lastError = error;
+              await sleepAbortable(RETRY_BACKOFF_BASE_MS * (attempt + 1), controller.signal);
+              continue;
+            }
+            const detail = networkErrorCauseDetail(error);
+            throw new Error(
+              detail
+                ? `The image provider connection failed (${detail}). Please retry, or switch to GPT Image 2 / 1.5 Pro.`
+                : "The image provider connection failed. Please retry, or switch to GPT Image 2 / 1.5 Pro.",
+            );
+          }
+          throw clarifyProviderRejection(error);
         }
-      } catch {
-        throw new Error("The image provider returned an invalid response.");
       }
-
-      if (!(response instanceof Response) || !response.ok) {
-        if (!(response instanceof Response)) {
-          throw new Error("The image provider did not return a usable response.");
-        }
-        const message = providerErrorMessage(payload) ?? "The image provider rejected the request.";
-        throw new Error(sanitizeMessage(message, effectiveApiKey ?? ""));
-      }
-
-      if (isGeminiImageModel(input.model)) {
-        const parsedGemini = geminiSuccessSchema.safeParse(payload);
-        if (!parsedGemini.success) throw new Error("The Gemini provider did not return an image.");
-        const imagePart = parsedGemini.data.candidates[0].content.parts.find(
-          (part) => part.inlineData || part.inline_data,
-        );
-        const inline = imagePart?.inlineData
-          ? { mimeType: imagePart.inlineData.mimeType, data: imagePart.inlineData.data }
-          : imagePart?.inline_data
-            ? { mimeType: imagePart.inline_data.mime_type, data: imagePart.inline_data.data }
-            : null;
-        if (!inline) throw new Error("The Gemini provider did not return an image.");
-        return {
-          url: `data:${inline.mimeType};base64,${inline.data}`,
-          model: input.model,
-          diagnostics: diagnosticsRef.current,
-        };
-      }
-
-      const parsed = providerSuccessSchema.safeParse(payload);
-      if (!parsed.success) {
-        throw new Error("The image provider did not return an image.");
-      }
-
-      const list =
-        parsed.data.data ??
-        parsed.data.result ??
-        parsed.data.output ??
-        parsed.data.images ??
-        parsed.data.image ??
-        [];
-      const image = list[0];
-      if (!image) throw new Error("The image provider did not return an image.");
-
-      const imageUrl =
-        (typeof image.image_url === "string" ? image.image_url : image.image_url?.url) ??
-        image.url ??
-        image.result_url ??
-        image.output_url;
-      const url = imageUrl ?? (image.b64_json ? `data:image/png;base64,${image.b64_json}` : null);
-      if (!url) throw new Error("The image provider did not return an image.");
-      return { url, model: input.model, diagnostics: diagnosticsRef.current };
-    } catch (error) {
-      if (isAbortError(error)) {
-        if (requestSignal?.aborted) {
-          throw requestSignal.reason instanceof Error
-            ? requestSignal.reason
-            : new DOMException("Generation cancelled", "AbortError");
-        }
-        throw new Error("Image generation was aborted. Please try again.");
-      }
-      if (isNetworkFetchError(error)) {
-        throw new Error(
-          "The image provider connection failed. Please retry, or switch to GPT Image 2 / 1.5 Pro.",
-        );
-      }
-      throw error;
+      throw lastError ?? new Error("Image generation failed after retries.");
     } finally {
       requestSignal?.removeEventListener("abort", abortFromRequest);
     }
@@ -605,14 +725,14 @@ export function createXiangsuImageGenerator({
 async function callGptImageEdit(
   editUrl: string,
   authHeader: string,
-  form: FormData,
+  form: ProviderFormData,
   fetcher: typeof fetch,
   signal: AbortSignal,
 ): Promise<{ buffer: Buffer; mimeType: string }> {
   const response = await fetcher(editUrl, {
     method: "POST",
     headers: { Authorization: authHeader },
-    body: form,
+    body: form as unknown as BodyInit,
     signal,
   });
   let payload: unknown;
@@ -691,7 +811,11 @@ async function runMaskedTextureTransfer(
   fetcher: typeof fetch,
   signal: AbortSignal,
   diagnosticsRef: { current?: XiangsuGenerateDiagnostics },
-): Promise<{ url: string; model: ImageGenerationModelId; diagnostics?: XiangsuGenerateDiagnostics }> {
+): Promise<{
+  url: string;
+  model: ImageGenerationModelId;
+  diagnostics?: XiangsuGenerateDiagnostics;
+}> {
   const maskCarrier = ordered.find((reference) => reference.maskUrl);
   if (!maskCarrier || !maskCarrier.url || !maskCarrier.maskUrl) {
     throw new Error("Masked texture transfer requires a base image with a mask.");
@@ -700,9 +824,7 @@ async function runMaskedTextureTransfer(
   const editUrl = env.OPENAI_API_KEY
     ? `${env.OPENAI_BASE_URL ?? "https://api.openai.com"}/v1/images/edits`
     : XIANGSU_EDIT_URL;
-  const editAuth = env.OPENAI_API_KEY
-    ? `Bearer ${env.OPENAI_API_KEY}`
-    : `Bearer ${apiKey}`;
+  const editAuth = env.OPENAI_API_KEY ? `Bearer ${env.OPENAI_API_KEY}` : `Bearer ${apiKey}`;
 
   const sharp = await loadSharp();
 
@@ -785,18 +907,14 @@ async function runMaskedTextureTransfer(
   // the mask.
   const isColorOnly =
     ordered.some((reference) => reference.source === "pantone") &&
-    !ordered.some(
-      (reference) => reference !== maskCarrier && reference.source === "image",
-    );
+    !ordered.some((reference) => reference !== maskCarrier && reference.source === "image");
 
   // The mask's bounding box (in base-pixel space) is used both as a textual
   // spatial cue in the prompt and for diagnostics. The highlight is rough
   // intent, so we do NOT collapse the edit to this rectangle — the actual
   // mask is sent to the provider and the local composite follows its shape.
   const rawAlphaMap =
-    baseWidth && baseHeight
-      ? await alphaMapFromBuffer(maskPngBuffer, baseWidth, baseHeight)
-      : null;
+    baseWidth && baseHeight ? await alphaMapFromBuffer(maskPngBuffer, baseWidth, baseHeight) : null;
   const maskBboxBase = rawAlphaMap ? alphaMapBbox(rawAlphaMap) : null;
 
   // Rough-location cue: tell the model the bbox in words so even without the
@@ -807,20 +925,26 @@ async function runMaskedTextureTransfer(
       ? `\n\nMask region (exact): bounding box (${maskBboxBase.minX},${maskBboxBase.minY})–(${maskBboxBase.maxX},${maskBboxBase.maxY}) on a ${baseWidth}×${baseHeight}px image. Recolor ONLY the pixels inside the attached alpha mask; do not recolor any neighbouring panel, seam, or object of the same material — the stroke is a literal selection, not a hint.`
       : "";
 
-  const form = new FormData();
+  const form = new ProviderFormData();
   form.append("model", input.model);
   form.append("prompt", `${passPrompt}${locationCue}`);
   form.append("n", "1");
   form.append("quality", gptQuality);
   form.append("response_format", "b64_json");
   form.append("output_format", "png");
-  form.append("image[]", new Blob([new Uint8Array(basePngBuffer)], { type: "image/png" }), "base.png");
+  form.append(
+    "image[]",
+    new Blob([new Uint8Array(basePngBuffer)], { type: "image/png" }),
+    "base.png",
+  );
   // Attach every auxiliary image reference (image[1..]) so the model has real
   // source pixels to draw from when filling the transparent region — e.g. a
   // "paste @product in this region" edit needs the product image, not just its
   // alias name. compileReferencePrompt no longer drops image refs when a mask
   // is attached, so `ordered` carries them after the maskCarrier (base).
-  const auxiliaryImageRefs = ordered.filter((reference) => reference !== maskCarrier && reference.source === "image");
+  const auxiliaryImageRefs = ordered.filter(
+    (reference) => reference !== maskCarrier && reference.source === "image",
+  );
   const auxiliaryImageUrls: string[] = [];
   for (const reference of auxiliaryImageRefs) {
     if (!reference.url) continue;
@@ -828,7 +952,11 @@ async function runMaskedTextureTransfer(
       const auxBlob = await blobFromReferenceUrl(reference.url, fetcher, signal);
       const auxBuffer = Buffer.from(await auxBlob.arrayBuffer());
       const auxPngBuffer = await sharp(auxBuffer).ensureAlpha().png().toBuffer();
-      form.append("image[]", new Blob([new Uint8Array(auxPngBuffer)], { type: "image/png" }), `${reference.alias}.png`);
+      form.append(
+        "image[]",
+        new Blob([new Uint8Array(auxPngBuffer)], { type: "image/png" }),
+        `${reference.alias}.png`,
+      );
       auxiliaryImageUrls.push(reference.url);
     } catch {
       // If an auxiliary fetch fails, continue without it — the prompt still
@@ -841,7 +969,11 @@ async function runMaskedTextureTransfer(
   // guards against drift outside the mask. The mask is sent UNSTRETCHED, in the
   // grid the user drew on.
   if (maskPngBuffer.length > 0) {
-    form.append("mask", new Blob([new Uint8Array(maskPngBuffer)], { type: "image/png" }), "mask.png");
+    form.append(
+      "mask",
+      new Blob([new Uint8Array(maskPngBuffer)], { type: "image/png" }),
+      "mask.png",
+    );
   }
 
   // Declared output size MUST follow the grid we actually send (base + mask are
@@ -897,9 +1029,7 @@ async function runMaskedTextureTransfer(
       ? "color-only"
       : "texture";
   if (baseWidth && baseHeight && maskPngBuffer.length > 0) {
-    const bboxShortSide = maskBboxBase
-      ? Math.min(maskBboxBase.width, maskBboxBase.height)
-      : 0;
+    const bboxShortSide = maskBboxBase ? Math.min(maskBboxBase.width, maskBboxBase.height) : 0;
     const isThinMask = bboxShortSide > 0 && bboxShortSide < 24;
     let dilate: number;
     let feather: number;
@@ -932,7 +1062,12 @@ async function runMaskedTextureTransfer(
     compiledPrompt: passPromptWithCue,
     resolvedReferences: ordered.map((reference) => ({
       alias: reference.alias,
-      role: reference === maskCarrier ? ("base-image-with-mask" as const) : reference.source === "pantone" ? ("pantone" as const) : ("reference-image" as const),
+      role:
+        reference === maskCarrier
+          ? ("base-image-with-mask" as const)
+          : reference.source === "pantone"
+            ? ("pantone" as const)
+            : ("reference-image" as const),
       imageUrl: reference.url,
       maskUrl: reference === maskCarrier ? reference.maskUrl : undefined,
       description: reference.description,
@@ -943,14 +1078,18 @@ async function runMaskedTextureTransfer(
       "image[0]": maskCarrier.url,
       ...Object.fromEntries(auxiliaryImageUrls.map((url, index) => [`image[${index + 1}]`, url])),
       ...(maskPngBuffer.length > 0 ? { mask: maskCarrier.maskUrl ?? "(attached png)" } : {}),
-      ...(maskBboxBase ? { maskBbox: `${maskBboxBase.minX},${maskBboxBase.minY} ${maskBboxBase.maxX},${maskBboxBase.maxY} (${maskBboxBase.width}x${maskBboxBase.height})` } : {}),
+      ...(maskBboxBase
+        ? {
+            maskBbox: `${maskBboxBase.minX},${maskBboxBase.minY} ${maskBboxBase.maxX},${maskBboxBase.maxY} (${maskBboxBase.width}x${maskBboxBase.height})`,
+          }
+        : {}),
       size: String(form.get("size") ?? ""),
       editMode,
     },
   };
 
   // Upload final buffer via /api/uploads.
-  const uploadForm = new FormData();
+  const uploadForm = new ProviderFormData();
   uploadForm.append(
     "file",
     new Blob([new Uint8Array(finalBuffer)], { type: "image/png" }),
@@ -960,7 +1099,7 @@ async function runMaskedTextureTransfer(
     `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/uploads`,
     {
       method: "POST",
-      body: uploadForm,
+      body: uploadForm as unknown as BodyInit,
       signal,
     },
   ).catch(() => null);
